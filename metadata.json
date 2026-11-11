@@ -1,0 +1,6 @@
+{
+  "name": "OutboundOS",
+  "description": "Desktop-first cold email outreach and sales engagement SaaS with multi-mailbox rotation, automated sequences, unified inbox, AI copywriting, deliverability monitoring, and CRM pipeline.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

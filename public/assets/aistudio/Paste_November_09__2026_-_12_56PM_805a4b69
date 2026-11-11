@@ -1,0 +1,1355 @@
+# MASTER DEVELOPMENT PROMPT — OUTBOUNDOS
+
+## 1. YOUR ROLE
+
+Act as a senior SaaS product architect, full-stack developer, database architect, UI/UX designer, email infrastructure engineer, automation engineer, and software security specialist.
+
+Your task is to design and build a complete, functional, desktop-first cold email outreach SaaS application called **OutboundOS**.
+
+The application should combine the strongest capabilities and workflows of popular cold email platforms such as Instantly, Snov.io, Smartlead, and Lemlist.
+
+IMPORTANT:
+
+Build an original product with comparable feature categories, capabilities, and professional usability. Do not copy their trademarks, source code, proprietary assets, or reproduce their exact branded interfaces.
+
+This is a serious software development project, not a landing page, visual concept, or static dashboard.
+
+Every button, menu, form, table action, setting, filter, and workflow must work.
+
+Do not create dummy functionality and claim it is operational.
+
+If an external integration requires an API key, OAuth application, paid service, or third-party infrastructure, build the integration interface, backend adapter, configuration workflow, and honest connection status.
+
+Do not stop after creating the frontend. Implement the backend, database, authentication, application logic, and functional workflows.
+
+---
+
+# 2. PRODUCT VISION
+
+Build a complete cold email outreach and sales engagement platform.
+
+The user should be able to:
+
+1. Add and manage multiple email accounts.
+2. Import thousands of leads.
+3. Organize prospects into lists and campaigns.
+4. Create sophisticated automated email sequences.
+5. Personalize emails using custom variables.
+6. Run A/B tests.
+7. Schedule outreach campaigns.
+8. Rotate between connected sending accounts within configured provider limits.
+9. Automatically stop sequences when a prospect replies, bounces, or unsubscribes.
+10. Manage all incoming replies from one unified inbox.
+11. Track campaign and individual mailbox performance.
+12. Monitor domain and email deliverability.
+13. Manage leads, deals, notes, and sales pipelines.
+14. Use AI to generate email copy, personalize messages, and analyze campaign performance.
+15. Integrate with external services through APIs and webhooks.
+
+The primary objective is to create a professional, usable alternative to existing cold outreach platforms.
+
+The product should initially support a single primary owner while maintaining an architecture that can later support multiple workspaces, team members, agencies, and subscriptions.
+
+# 3. TECHNICAL ARCHITECTURE
+
+Use a modern, maintainable full-stack architecture compatible with Google AI Studio Build mode.
+
+Frontend:
+- React.
+- TypeScript.
+- Tailwind CSS.
+- shadcn/ui or equivalent professional component library.
+- Lucide icons.
+- Recharts for analytics.
+- TanStack Query for server state.
+- React Router for application navigation.
+
+Backend:
+- Node.js.
+- TypeScript.
+- Secure REST API.
+- Modular service architecture.
+- Server-side API integrations.
+- Persistent asynchronous job processing.
+- Scheduled campaign execution.
+
+Database:
+- Firebase Firestore.
+- Firebase Authentication.
+- Workspace-based data structure.
+- Persistent database records.
+- Server-side validation and authorization.
+
+AI:
+- Google Gemini API.
+- Use server-side Gemini calls.
+- Never expose private API credentials in frontend JavaScript.
+
+Email infrastructure:
+- Gmail API with OAuth 2.0.
+- Microsoft Graph API with OAuth 2.0.
+- SMTP/IMAP support for compatible email providers.
+- Nodemailer where appropriate.
+- OAuth token refresh handling.
+
+Background processing:
+- Use a persistent job queue and scheduler.
+- Prefer Google Cloud Tasks and Cloud Scheduler or an equivalent durable worker architecture.
+- Scheduled campaigns must continue running when the user closes the application.
+- Do not rely on frontend timers, browser sessions, or in-memory queues.
+- Implement retry handling, idempotency, job locking, and error logging.
+
+Security:
+- Keep credentials and refresh tokens server-side.
+- Encrypt sensitive credentials at rest.
+- Use server-side authorization checks.
+- Never log API keys, passwords, OAuth tokens, or unnecessary personal information.
+- Implement rate limiting, input validation, and secure session handling.
+
+The generated application must support both:
+1. Google AI Studio preview and deployment.
+2. Exported source code running on a local laptop.
+
+Provide environment variable documentation and an .env.example file without real secrets.
+
+# 4. PROFESSIONAL USER INTERFACE AND EXPERIENCE
+
+Build an extremely polished SaaS interface.
+
+The UI should feel like a premium commercial email marketing application.
+
+Design requirements:
+
+- Desktop-first layout.
+- Optimized for 1366px, 1440px, and 1920px laptop screens.
+- Fully responsive on smaller screens.
+- Collapsible left sidebar.
+- Professional light mode.
+- Optional dark mode.
+- Modern typography.
+- Clean spacing.
+- Subtle borders and shadows.
+- Rounded cards.
+- Elegant data tables.
+- Functional dropdowns.
+- Professional charts.
+- Clear notifications.
+- Skeleton loading states.
+- Empty states.
+- Confirmation dialogs.
+- Tooltips.
+- Command search.
+- Keyboard-friendly interaction.
+
+Avoid excessive gradients, oversized headings, unnecessary animations, or decorative elements.
+
+Use a premium SaaS visual language.
+
+## Main Navigation
+
+Create the following sidebar navigation:
+
+1. Dashboard
+2. Leads
+3. Lists
+4. Campaigns
+5. Email Accounts
+6. Unified Inbox
+7. Deliverability
+8. Warm-up
+9. Analytics
+10. CRM
+11. Automations
+12. AI Assistant
+13. Integrations
+14. Settings
+
+Each navigation item must open its own functional page.
+
+Include a workspace switcher, user profile, notifications, global search, and a prominent Create Campaign button.
+
+# 5. DASHBOARD
+
+Build a professional analytics dashboard.
+
+Display:
+
+- Total leads.
+- Total emails sent.
+- Emails accepted by sending providers.
+- Replies.
+- Positive replies.
+- Negative replies.
+- Bounce rate.
+- Unsubscribe rate.
+- Meetings booked.
+- Active campaigns.
+- Paused campaigns.
+- Queued emails.
+- Connected email accounts.
+
+Include:
+
+- Campaign performance graph.
+- Daily sending activity.
+- Reply-rate graph.
+- Mailbox performance comparison.
+- Recent conversations.
+- Recent campaign activity.
+- Account health overview.
+- Campaign performance ranking.
+- Upcoming scheduled activities.
+
+Allow filtering by:
+- Today.
+- Yesterday.
+- Last 7 days.
+- Last 30 days.
+- Last 90 days.
+- Custom date range.
+
+All dashboard metrics must come from actual database records and tracked sending events.
+
+Never display fabricated performance results.
+
+# 6. LEAD MANAGEMENT SYSTEM
+
+Build a powerful lead management module.
+
+## Lead Database
+
+Every lead should support the following fields:
+
+- First name.
+- Last name.
+- Full name.
+- Email.
+- Job title.
+- Company.
+- Company website.
+- Company domain.
+- Industry.
+- Country.
+- State.
+- City.
+- LinkedIn URL.
+- Phone number.
+- Company size.
+- Source.
+- Verification status.
+- Lead status.
+- Assigned owner.
+- Custom fields.
+- Notes.
+- Tags.
+- Date added.
+- Last contacted.
+- Last reply.
+- Unsubscribe status.
+- Data source.
+- Lawful-basis or consent record where applicable.
+
+Allow the user to create unlimited custom fields within reasonable database limits.
+
+## CSV Importer
+
+Build a complete CSV import workflow.
+
+Features:
+
+- Upload CSV.
+- Drag and drop files.
+- Preview imported records.
+- Map CSV columns to lead fields.
+- Automatically recognize common column names.
+- Create custom fields from unmapped columns.
+- Validate email syntax.
+- Detect duplicate contacts.
+- Detect missing information.
+- Choose duplicate handling rules.
+- Preview import results.
+- Import all valid records.
+- Export lead lists.
+
+Support large files using server-side batch processing and progress indicators.
+
+Do not silently discard invalid records. Provide an import report.
+
+## Lead Table
+
+Create a powerful table with:
+
+- Search.
+- Filters.
+- Sorting.
+- Pagination.
+- Column visibility.
+- Saved views.
+- Bulk selection.
+- Bulk editing.
+- Tagging.
+- Exporting.
+- Delete and archive actions.
+
+Allow the user to filter by industry, job title, company, country, verification status, campaign, tags, and other custom fields.
+
+## Lead Profile
+
+Clicking a lead should open a detailed profile.
+
+Display:
+- Contact information.
+- Company information.
+- Campaign history.
+- Emails sent.
+- Incoming replies.
+- Notes.
+- Tasks.
+- Associated deals.
+- Activity timeline.
+- Unsubscribe and suppression status.
+
+Prevent duplicate contacts from entering active campaigns accidentally.
+
+# 7. LISTS AND SEGMENTATION
+
+Allow users to create, rename, duplicate, archive, and delete lead lists.
+
+Features:
+
+- Static lists.
+- Dynamic segments.
+- Saved filters.
+- List membership.
+- Bulk import.
+- Bulk export.
+- List comparison.
+- Duplicate removal.
+- Exclusion lists.
+- Shared suppression lists.
+
+Allow leads to be moved between lists without losing campaign history.
+
+A lead must not be contacted again if the workspace suppression list blocks that address.
+
+# 8. EMAIL ACCOUNT MANAGEMENT
+
+This is one of the most important modules.
+
+Build an Email Accounts dashboard similar in capability to professional cold outreach platforms.
+
+## Connect Email Accounts
+
+Support:
+
+1. Gmail / Google Workspace.
+2. Outlook / Microsoft 365.
+3. Other SMTP/IMAP providers.
+
+Use secure OAuth 2.0 authentication wherever supported.
+
+For SMTP/IMAP accounts, support encrypted credentials or OAuth-based authentication according to provider capabilities.
+
+Never ask users to enter their normal Gmail or Microsoft password into the application.
+
+## Email Account Dashboard
+
+Display:
+
+- Email address.
+- Provider.
+- Connection status.
+- Authentication status.
+- Daily sending limit.
+- Emails sent today.
+- Emails queued.
+- Campaigns assigned.
+- Replies received.
+- Bounce count.
+- Last synchronization.
+- Account health.
+- Warm-up status.
+
+## Account Actions
+
+- Add account.
+- Disconnect account.
+- Reconnect account.
+- Pause account.
+- Resume account.
+- Send test email.
+- Synchronize inbox.
+- Edit settings.
+- Assign tags.
+- Bulk edit.
+- Bulk pause.
+- Bulk resume.
+- Delete connection.
+
+Create an individual account settings drawer.
+
+Settings should include:
+- Daily send limit.
+- Sending interval.
+- Campaign assignment.
+- Reply synchronization.
+- Timezone.
+- Account signature.
+- Connection status.
+- Sending preferences.
+
+## Multiple Inbox Rotation
+
+Implement a fair sender-selection algorithm.
+
+Allow campaigns to use multiple connected sending accounts.
+
+Support:
+- Round-robin selection.
+- Least-recently-used selection.
+- Account availability.
+- Per-account sending limits.
+- Provider rate limits.
+- Account-specific schedules.
+- Automatic exclusion of disconnected or paused mailboxes.
+
+Rotation must balance sending across accounts without bypassing email provider restrictions or configured sending limits.
+
+# 9. CAMPAIGN BUILDER
+
+Create a powerful, professional campaign builder.
+
+This should be one of the application's best-designed features.
+
+## Create Campaign Workflow
+
+Step 1: Campaign information.
+
+- Campaign name.
+- Description.
+- Internal tags.
+- Campaign owner.
+
+Step 2: Select leads.
+
+- Select existing lists.
+- Select individual leads.
+- Apply filters.
+- Exclude lists.
+- Exclude previously contacted leads.
+- Preview final recipients.
+
+Step 3: Create email sequence.
+
+Build a visual sequence editor.
+
+## Sequence Builder
+
+Support these step types:
+
+1. Send email.
+2. Wait for a specified number of minutes.
+3. Wait for hours.
+4. Wait for days.
+5. Conditional branch.
+6. Manual follow-up task.
+7. End sequence.
+
+The initial live implementation must support email, delays, and the essential reply/unsubscribe/bounce conditions.
+
+Allow users to add, delete, duplicate, rearrange, and edit steps.
+
+## Email Editor
+
+Every email step must include:
+
+- Subject line.
+- Email body.
+- Personalization variables.
+- Preview.
+- Test email.
+- Save draft.
+- Plain-text mode.
+- HTML mode.
+- Email templates.
+
+Allow variables such as:
+
+{{first_name}}
+
+{{last_name}}
+
+{{company}}
+
+{{job_title}}
+
+{{website}}
+
+{{city}}
+
+{{country}}
+
+{{custom_field}}
+
+Include fallback values where data is missing.
+
+Example:
+
+Hi {{first_name | fallback: "there"}},
+
+I noticed your company works in {{industry | fallback: "your industry"}}.
+
+Allow users to insert variables from a field picker.
+
+Add:
+- AI copy generator.
+- Grammar improvement.
+- Shorten email.
+- Make email more personalized.
+- Generate subject lines.
+- Generate follow-up email.
+- Improve clarity.
+- Preview using an actual selected lead's data.
+
+Never invent facts about a company or recipient.
+
+## Follow-up Settings
+
+Support:
+- Wait 1 day.
+- Wait 2 days.
+- Wait 3 days.
+- Custom delays.
+- Follow-up subject inheritance.
+- Reply detection.
+- Stop on reply.
+- Stop on unsubscribe.
+- Stop on hard bounce.
+- Optional out-of-office handling.
+
+## A/B Testing
+
+Implement A/B testing.
+
+Allow users to create multiple versions of:
+
+- Subject lines.
+- Email bodies.
+- Opening lines.
+- Calls to action.
+
+Split eligible leads between variants.
+
+Show the number of prospects assigned to each variant and compare performance.
+
+Do not declare a statistically meaningful winner based on insufficient data.
+
+# 10. CAMPAIGN SCHEDULING AND SETTINGS
+
+Create a dedicated campaign settings interface.
+
+Include:
+
+## Sending Schedule
+
+- Start date.
+- End date.
+- Sending days.
+- Weekday selection.
+- Start time.
+- End time.
+- Timezone.
+- Recipient-local timezone option.
+- Weekend sending toggle.
+- Holiday exclusions.
+
+## Sending Limits
+
+- Daily campaign limit.
+- Daily mailbox limit.
+- Maximum new leads per day.
+- Maximum messages per company domain.
+- Maximum concurrent sending jobs.
+- Minimum interval between messages.
+- Controlled sending pace.
+
+## Sending Preferences
+
+- Sender account selection.
+- Mailbox rotation.
+- Reply tracking.
+- Bounce tracking.
+- Optional open tracking.
+- Optional click tracking.
+- Plain-text sending.
+- Automatic unsubscribe handling.
+- Stop sequence on reply.
+
+The system must ensure that campaign-level and mailbox-level limits are both respected.
+
+# 11. EMAIL SENDING ENGINE
+
+Implement an actual email sending system.
+
+Do not simulate live email delivery.
+
+Use provider-specific sending adapters.
+
+## Gmail
+
+Use the Gmail API and OAuth 2.0.
+
+Implement:
+- Account authorization.
+- Secure refresh tokens.
+- Sending messages.
+- Reading relevant message threads.
+- Retrieving replies.
+- Message identifiers.
+- Error handling.
+
+## Microsoft Outlook
+
+Use Microsoft Graph API and OAuth 2.0.
+
+Implement:
+- Account authorization.
+- Sending email.
+- Synchronizing replies.
+- Conversation tracking.
+- Refresh and reconnect handling.
+
+## SMTP/IMAP
+
+Use Nodemailer for supported SMTP sending and compatible IMAP tooling for incoming message synchronization.
+
+Implement encrypted credential storage.
+
+## Sending Queue
+
+Create a persistent sending queue.
+
+Every email should have:
+
+- Job ID.
+- Campaign ID.
+- Lead ID.
+- Sending account ID.
+- Sequence step ID.
+- Scheduled timestamp.
+- Status.
+- Attempt count.
+- Provider message ID.
+- Error details.
+
+Job states:
+
+- Scheduled.
+- Queued.
+- Processing.
+- Sent/accepted by provider.
+- Deferred.
+- Bounced.
+- Failed.
+- Cancelled.
+
+Implement:
+- Retry logic.
+- Exponential backoff.
+- Idempotency.
+- Duplicate-send prevention.
+- Provider throttling.
+- Failed-job reporting.
+- Automatic recovery after worker restart.
+
+Only send when the campaign is active, the sender is authorized, the recipient is eligible, and all configured restrictions are satisfied.
+
+Create an explicit live-send confirmation.
+
+Include a test mode that sends only to a user-controlled test address.
+
+# 12. UNIFIED INBOX
+
+Build a complete unified inbox.
+
+This should be similar in functionality to Instantly Unibox and Smartlead Master Inbox.
+
+The user should be able to view messages from all connected email accounts in one place.
+
+## Inbox Layout
+
+Left column:
+- All conversations.
+- Unread.
+- Interested.
+- Not interested.
+- Replied.
+- Follow-up required.
+- Meetings booked.
+- Out of office.
+- Bounced.
+- Archived.
+
+Middle column:
+- Conversation list.
+- Lead name.
+- Company.
+- Email subject.
+- Latest reply.
+- Time.
+- Unread status.
+- Sending account.
+
+Right panel:
+- Full conversation history.
+- Email content.
+- Reply composer.
+- Lead profile.
+- Campaign information.
+- Activity timeline.
+- Internal notes.
+
+## Inbox Features
+
+- Reply.
+- Reply all when supported.
+- Forward.
+- Archive.
+- Mark unread.
+- Mark read.
+- Assign conversation.
+- Add notes.
+- Add tags.
+- Search.
+- Filter.
+- Snooze.
+- Open lead profile.
+
+## Reply Detection
+
+Detect inbound replies and automatically:
+
+1. Link the reply to the correct lead.
+2. Link it to the correct campaign.
+3. Stop pending campaign follow-ups when appropriate.
+4. Update lead status.
+5. Record the reply.
+6. Update campaign analytics.
+
+Include an AI reply classifier that can categorize messages as:
+
+- Positive.
+- Negative.
+- Interested.
+- Not interested.
+- Out of office.
+- Unsubscribe request.
+- Wrong person.
+- Referral.
+- Question.
+- Other.
+
+AI classifications must be editable.
+
+By default, AI-generated replies should require human review before being sent.
+
+# 13. EMAIL WARM-UP MODULE
+
+Build a separate Warm-up dashboard.
+
+Include:
+- Connected account.
+- Warm-up provider.
+- Warm-up status.
+- Start date.
+- Daily configured volume.
+- Warm-up statistics.
+- Account readiness checklist.
+- Historical performance.
+- Pause and resume controls.
+
+Add configurable warm-up integrations using approved third-party APIs.
+
+If no provider is connected, display a genuine setup requirement.
+
+Do not manufacture conversations, fake inbox placement, or claim to have warmed an account when no real warm-up service is running.
+
+Make all warm-up metrics traceable to actual provider data.
+
+# 14. DELIVERABILITY CENTER
+
+Create a dedicated Deliverability dashboard.
+
+Monitor:
+
+- SPF.
+- DKIM.
+- DMARC.
+- MX records.
+- DNS configuration.
+- Domain status.
+- Sending account status.
+- Bounce rates.
+- Spam complaint information where available.
+- Provider errors.
+- Domain reputation integrations.
+- Blacklist integrations.
+- Inbox placement integrations.
+
+Create a transparent account health score based on available real data.
+
+Show users what affects their score.
+
+Include:
+- Domain checker.
+- DNS record lookup.
+- Authentication checklist.
+- Email content checker.
+- Risk alerts.
+- Sending volume recommendations.
+- Account health history.
+
+Build integration adapters for external blacklist, reputation, and inbox-placement services.
+
+Clearly distinguish DNS checks, inferred health indicators, and actual inbox-placement test results.
+
+Never guarantee inbox placement.
+
+# 15. ANALYTICS AND REPORTING
+
+Create advanced campaign analytics.
+
+Campaign metrics:
+
+- Leads enrolled.
+- Emails attempted.
+- Emails accepted by providers.
+- Confirmed bounces.
+- Replies.
+- Positive replies.
+- Negative replies.
+- Unsubscribes.
+- Meetings booked.
+- Variant performance.
+- Follow-up performance.
+
+Mailbox analytics:
+
+- Messages sent.
+- Provider errors.
+- Reply count.
+- Bounce count.
+- Daily usage.
+- Account availability.
+
+Additional reports:
+
+- Campaign comparison.
+- Sender comparison.
+- Lead source comparison.
+- Daily performance.
+- Weekly performance.
+- Monthly performance.
+
+Tracking metrics must clearly explain their limitations. Opens can be unreliable because of privacy features, and provider acceptance must not be confused with confirmed inbox delivery.
+
+Allow reports to be exported as CSV.
+
+# 16. CRM AND SALES PIPELINE
+
+Build a lightweight but professional CRM.
+
+Include a Kanban pipeline.
+
+Default stages:
+
+1. New.
+2. Contacted.
+3. Replied.
+4. Interested.
+5. Meeting booked.
+6. Proposal sent.
+7. Won.
+8. Lost.
+
+Allow custom stages.
+
+Each lead should be associated with:
+- Deals.
+- Deal value.
+- Owner.
+- Tasks.
+- Meeting date.
+- Notes.
+- Communication history.
+- Follow-up date.
+
+Allow drag-and-drop movement between pipeline stages.
+
+Provide filters, search, and reporting.
+
+# 17. AUTOMATION BUILDER
+
+Create a visual automation system.
+
+Support event-based triggers:
+
+- New lead added.
+- Campaign started.
+- Email sent.
+- Reply received.
+- Positive reply received.
+- Bounce detected.
+- Unsubscribe received.
+- Meeting booked.
+- Deal stage changed.
+
+Support actions:
+
+- Add tag.
+- Remove tag.
+- Update lead status.
+- Assign owner.
+- Create task.
+- Pause campaign.
+- End sequence.
+- Add to another eligible campaign.
+- Send webhook.
+- Notify user.
+
+Create a visual workflow interface.
+
+All automations must have execution history and error logs.
+
+# 18. AI ASSISTANT
+
+Integrate Gemini AI into the application.
+
+Create a dedicated AI Assistant page.
+
+The assistant should understand the user's campaign data and help with:
+
+- Writing cold email sequences.
+- Generating subject lines.
+- Generating follow-ups.
+- Personalizing existing email copy.
+- Improving email clarity.
+- Reviewing campaigns.
+- Summarizing replies.
+- Categorizing incoming leads.
+- Analyzing campaign results.
+- Recommending audience segments.
+- Identifying campaign problems.
+
+Add AI actions directly inside the email editor.
+
+Include an AI chat interface with conversation history.
+
+The AI must not claim it has accessed a website, researched a company, or verified an email unless the relevant integration actually performed that action.
+
+Require confirmation for consequential actions such as launching, modifying, or sending campaigns.
+
+# 19. LEAD FINDER AND EXTERNAL DATA PROVIDERS
+
+Build a Lead Finder module.
+
+The application should support external lead data providers.
+
+Start with a modular integration architecture that can support Snov.io's API and additional providers later.
+
+Potential search functionality:
+
+- Company name.
+- Company domain.
+- Industry.
+- Location.
+- Job title.
+- Department.
+- Seniority.
+- Company size.
+
+Allow:
+- Search results.
+- Prospect profile.
+- Email enrichment.
+- Email verification.
+- Import into leads.
+- Add to a campaign.
+
+Provide API configuration screens and integration status.
+
+Do not invent a database containing millions of contacts.
+
+Do not scrape LinkedIn or bypass third-party access restrictions.
+
+Use authorized data providers and APIs, and retain source and collection information for imported contacts.
+
+# 20. EMAIL VERIFICATION
+
+Create a dedicated Email Verification module.
+
+Features:
+
+- Single email verification.
+- Bulk verification.
+- CSV upload.
+- Verification history.
+- Verification status.
+- Risk classification.
+- Export results.
+
+Statuses:
+
+- Valid.
+- Invalid.
+- Catch-all.
+- Unknown.
+- Risky.
+- Disposable.
+- Pending verification.
+
+Use an external verification provider where configured.
+
+Provide basic syntax and domain/MX checks separately from authoritative mailbox verification.
+
+Never present an MX lookup as proof that an individual mailbox exists.
+
+Allow users to configure campaign rules that exclude invalid or high-risk addresses.
+
+# 21. INTEGRATIONS
+
+Create an Integrations page.
+
+Design a standardized API adapter system.
+
+Potential integrations:
+
+Email:
+- Gmail.
+- Google Workspace.
+- Microsoft Outlook.
+- Microsoft 365.
+- SMTP/IMAP.
+
+Lead data:
+- Snov.io.
+- Other authorized prospecting APIs.
+
+CRM:
+- HubSpot.
+- Pipedrive.
+
+Automation:
+- Zapier.
+- Make.
+- Incoming and outgoing webhooks.
+
+Other:
+- Google Calendar.
+- Calendly.
+
+For every integration, display:
+
+- Connection status.
+- API configuration.
+- Permissions.
+- Last synchronization.
+- Errors.
+- Connect and disconnect actions.
+
+Never display a connected status until a real connection test succeeds.
+
+# 22. COMPLIANCE AND SENDING SAFEGUARDS
+
+Treat privacy, applicable marketing regulations, and sender reputation as core application requirements.
+
+Build:
+
+- Global suppression list.
+- Unsubscribe page.
+- Immediate suppression after an unsubscribe request.
+- Bounce suppression.
+- Duplicate-send prevention.
+- Accurate sender identity.
+- Physical business mailing address settings where required.
+- Configurable message footer.
+- Recipient source and lawful-basis records.
+- Country-specific compliance settings.
+- Data export and deletion.
+- Audit logs.
+
+Support one-click unsubscribe headers where applicable, including the relevant List-Unsubscribe headers.
+
+Never allow a previously unsubscribed address to be re-added and contacted merely because it appears in a newly imported CSV.
+
+Make compliance checks part of campaign launch validation.
+
+Provide configurable safeguards based on applicable jurisdiction. Do not assume that the same consent rules apply to every country or recipient type.
+
+# 23. TEAM AND WORKSPACE ARCHITECTURE
+
+Initially provide a straightforward single-owner experience.
+
+However, prepare the database for multiple users and workspaces.
+
+Roles:
+
+- Owner.
+- Admin.
+- Manager.
+- Member.
+- Read-only.
+
+Support:
+- Workspace settings.
+- Invitations.
+- Role permissions.
+- Shared lead lists.
+- Shared suppression lists.
+- Shared campaigns.
+- Internal notes.
+- Audit history.
+
+All user data must be separated by workspace.
+
+# 24. SETTINGS
+
+Create a complete settings system.
+
+Sections:
+
+- Profile.
+- Workspace.
+- Email accounts.
+- Sending preferences.
+- Notifications.
+- AI settings.
+- Integrations.
+- API keys.
+- Webhooks.
+- Security.
+- Data export.
+- Privacy.
+- Subscription readiness.
+
+Include a user-friendly onboarding checklist.
+
+# 25. DATABASE DESIGN
+
+Create a clean Firestore data model.
+
+Include collections or equivalent structures for:
+
+- users
+- workspaces
+- workspaceMembers
+- leads
+- companies
+- lists
+- segments
+- campaigns
+- campaignSteps
+- campaignVariants
+- mailboxAccounts
+- emailMessages
+- conversations
+- sendingJobs
+- sendingEvents
+- suppressionRecords
+- unsubscribeEvents
+- tasks
+- deals
+- pipelines
+- automations
+- integrations
+- webhooks
+- tags
+- customFields
+- notifications
+- auditLogs
+- workspaceSettings
+
+Every record must include relevant identifiers and timestamps.
+
+Use workspaceId for tenant isolation.
+
+Create the necessary Firestore indexes and security rules.
+
+Never rely on frontend filtering as the only access-control mechanism.
+
+# 26. CRITICAL IMPLEMENTATION REQUIREMENTS
+
+These requirements are mandatory.
+
+1. Build real pages for every main navigation section.
+2. Connect forms to actual database operations.
+3. Connect all tables to persistent database data.
+4. Make search, sorting, pagination, and filters functional.
+5. Make campaign creation functional.
+6. Make CSV import functional.
+7. Make email account configuration functional.
+8. Implement the campaign scheduling logic.
+9. Implement the sending worker architecture.
+10. Implement real email provider adapters.
+11. Implement reply synchronization.
+12. Implement suppression and unsubscribe handling.
+13. Connect analytics to recorded events.
+14. Connect Gemini AI to actual backend endpoints.
+15. Implement proper error handling.
+16. Include loading, success, and failure states.
+17. Include appropriate empty states.
+18. Never expose server secrets.
+19. Never fabricate campaign results.
+20. Never mark a feature completed until it is actually implemented and tested.
+
+If a third-party feature cannot run without an API key, build a functional setup flow and clearly show that an external integration is required.
+
+Create a dedicated Demo Mode with clearly labelled simulated data. Demo Mode must never be confused with live sending.
+
+# 27. TESTING AND ACCEPTANCE CRITERIA
+
+Test the entire product.
+
+Minimum complete workflow:
+
+1. User registers.
+2. User creates a workspace.
+3. User imports a CSV.
+4. Leads are saved.
+5. Duplicate handling works.
+6. User connects or configures an email account.
+7. Connection test works.
+8. User creates a campaign.
+9. User selects a lead list.
+10. User creates a three-step sequence.
+11. Personalization variables populate correctly.
+12. User previews and tests the sequence.
+13. Sending settings are configured.
+14. Compliance validation runs.
+15. User launches the campaign.
+16. Sending jobs are queued.
+17. Worker executes eligible jobs.
+18. Sending events are saved.
+19. Incoming replies synchronize.
+20. Follow-ups stop after a reply.
+21. Unsubscribe requests suppress the lead.
+22. Analytics update correctly.
+23. The user can export performance data.
+
+Add unit and integration tests for critical backend functionality.
+
+Fix:
+- TypeScript errors.
+- Broken imports.
+- Missing dependencies.
+- Invalid API requests.
+- Database errors.
+- Authentication issues.
+- Broken navigation.
+- Nonfunctional buttons.
+- Duplicate job execution.
+- Sending queue errors.
+
+Do not leave obvious TODOs in the core workflows.
+
+# 28. DEVELOPMENT ROADMAP
+
+Build in the following implementation order.
+
+PHASE 1 — FOUNDATION
+- Project structure.
+- UI system.
+- Authentication.
+- Database.
+- Workspace.
+- Navigation.
+- Dashboard.
+
+PHASE 2 — LEAD MANAGEMENT
+- Lead database.
+- CSV import.
+- Lists.
+- Filters.
+- Custom fields.
+- Suppression lists.
+
+PHASE 3 — EMAIL INFRASTRUCTURE
+- Gmail OAuth.
+- Microsoft OAuth.
+- SMTP/IMAP adapters.
+- Account management.
+- Sending queue.
+- Campaign scheduler.
+
+PHASE 4 — CAMPAIGNS
+- Campaign creation.
+- Sequence editor.
+- Variables.
+- A/B testing.
+- Scheduling.
+- Sender rotation.
+- Follow-up rules.
+
+PHASE 5 — UNIFIED INBOX
+- Incoming email synchronization.
+- Conversations.
+- Replies.
+- Lead classification.
+- Conversation assignments.
+
+PHASE 6 — ANALYTICS AND CRM
+- Performance reporting.
+- CRM pipeline.
+- Tasks.
+- Deals.
+
+PHASE 7 — AI AND INTEGRATIONS
+- Gemini AI.
+- Email writing assistant.
+- Lead provider APIs.
+- Verification integrations.
+- External webhooks.
+
+PHASE 8 — DELIVERABILITY AND SECURITY
+- DNS checker.
+- Domain health.
+- Warm-up integrations.
+- Inbox placement integrations.
+- Security audit.
+- Compliance validation.
+
+Build a functioning foundation and core end-to-end workflow first. Then implement the remaining modules in the stated order.
+
+Do not stop after writing an implementation plan.
+
+# 29. FINAL DELIVERY
+
+When development is complete, provide:
+
+1. A functioning desktop web application.
+2. A clean, professional UI.
+3. Fully connected frontend and backend.
+4. Persistent database.
+5. Authentication system.
+6. Email integration architecture.
+7. Campaign automation system.
+8. Sending and reply synchronization.
+9. Analytics.
+10. AI functionality.
+11. README documentation.
+12. .env.example.
+13. Database setup instructions.
+14. OAuth configuration instructions.
+15. API configuration instructions.
+16. Local laptop installation instructions.
+17. Deployment instructions.
+
+Make the application installable as a PWA.
+
+The application must work in Chrome and Microsoft Edge on Windows laptops.
+
+Make sure the source code can be exported and maintained outside Google AI Studio.
+
+The final product should feel like a mature, professionally designed cold email SaaS platform rather than an experimental AI-generated project.
+
+**START BUILDING THE APPLICATION NOW.**
