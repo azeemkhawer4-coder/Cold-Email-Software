@@ -3,6 +3,58 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <script>
+      // Allow browser extensions (request interceptors, ad blockers) to set window.fetch
+      (function () {
+        try {
+          var _origFetch = window.fetch;
+          Object.defineProperty(window, 'fetch', {
+            get: function () {
+              return _origFetch;
+            },
+            set: function (newFetch) {
+              _origFetch = newFetch;
+            },
+            configurable: true,
+            enumerable: true,
+          });
+        } catch (_) {}
+
+        // Suppress extension and WebSocket runtime errors from propagating to application boundaries
+        window.addEventListener(
+          'error',
+          function (e) {
+            var msg = e && (e.message || '');
+            var src = e && (e.filename || '');
+            if (
+              msg.indexOf('Cannot set property fetch') !== -1 ||
+              msg.indexOf('WebSocket') !== -1 ||
+              src.indexOf('chrome-extension://') !== -1 ||
+              src.indexOf('@vite/client') !== -1
+            ) {
+              e.stopImmediatePropagation();
+              e.preventDefault();
+              return true;
+            }
+          },
+          true
+        );
+
+        window.addEventListener(
+          'unhandledrejection',
+          function (e) {
+            var reason = e && e.reason;
+            var msg = reason ? (reason.message || String(reason)) : '';
+            if (msg.indexOf('WebSocket') !== -1 || msg.indexOf('Cannot set property fetch') !== -1) {
+              e.stopImmediatePropagation();
+              e.preventDefault();
+              return true;
+            }
+          },
+          true
+        );
+      })();
+    </script>
     <title>OutboundOS — Cold Email Outreach & Sales Engagement Platform</title>
     <meta name="description" content="Desktop-first cold email outreach and sales engagement SaaS with multi-mailbox rotation, automated sequences, unified inbox, AI copywriting, deliverability monitoring, and CRM pipeline." />
     <meta property="og:title" content="OutboundOS — Cold Email Outreach & Sales Engagement Platform" />

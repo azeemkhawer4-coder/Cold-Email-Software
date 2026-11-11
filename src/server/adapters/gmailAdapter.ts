@@ -1,4 +1,5 @@
 import { MailboxAccount, MailboxOAuthConfig, FailureType, InboundMessage } from '../../types';
+import { decryptSecret } from '../db/crypto';
 
 export interface AdapterSendResult {
   success: boolean;
@@ -17,10 +18,11 @@ export async function refreshGoogleToken(
 ): Promise<{ accessToken: string; expiresAt: number } | null> {
   if (!oauth.refreshToken) return null;
 
+  const actualRefreshToken = decryptSecret(oauth.refreshToken);
   const clientId = oauth.clientId || process.env.GOOGLE_CLIENT_ID;
   const clientSecret = oauth.clientSecret || process.env.GOOGLE_CLIENT_SECRET;
 
-  if (!clientId || !clientSecret) {
+  if (!clientId || !clientSecret || !actualRefreshToken) {
     return null;
   }
 
@@ -31,7 +33,7 @@ export async function refreshGoogleToken(
       body: new URLSearchParams({
         client_id: clientId,
         client_secret: clientSecret,
-        refresh_token: oauth.refreshToken,
+        refresh_token: actualRefreshToken,
         grant_type: 'refresh_token',
       }),
     });

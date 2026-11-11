@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Sidebar, NavigationItem } from './components/Sidebar';
 import { Header } from './components/Header';
 import { SimulateReplyModal } from './components/SimulateReplyModal';
+import { LocalAuthModal } from './components/LocalAuthModal';
 import { DashboardPage } from './pages/DashboardPage';
 import { LeadsPage } from './pages/LeadsPage';
 import { ListsPage } from './pages/ListsPage';
@@ -62,9 +63,30 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => {
-    fetchAllData();
+  const [authStatus, setAuthStatus] = useState<{ isSetup: boolean; authenticated: boolean; user?: any } | null>(null);
+
+  const checkAuth = useCallback(async () => {
+    try {
+      const res = await fetch('/api/auth/status');
+      if (res.ok) {
+        const data = await res.json();
+        setAuthStatus(data);
+        if (data.authenticated || !data.isSetup) {
+          fetchAllData();
+        } else {
+          setIsLoading(false);
+        }
+      } else {
+        fetchAllData();
+      }
+    } catch (_) {
+      fetchAllData();
+    }
   }, [fetchAllData]);
+
+  useEffect(() => {
+    checkAuth();
+  }, [checkAuth]);
 
   const handleTriggerWorker = async () => {
     setIsWorkerRunning(true);
@@ -236,6 +258,17 @@ export default function App() {
         leads={leads}
         onReplySimulated={fetchAllData}
       />
+
+      {/* Local Administrator Setup & Authentication Modal */}
+      {authStatus && (!authStatus.isSetup || !authStatus.authenticated) && (
+        <LocalAuthModal
+          isSetup={authStatus.isSetup}
+          onAuthSuccess={(user) => {
+            setAuthStatus({ isSetup: true, authenticated: true, user });
+            fetchAllData();
+          }}
+        />
+      )}
     </div>
   );
 }

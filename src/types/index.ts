@@ -114,6 +114,15 @@ export interface CampaignStats {
   bounced: number;
   unsubscribed: number;
   meetingsBooked: number;
+  totalLeads?: number;
+  sentCount?: number;
+  deliveredCount?: number;
+  openCount?: number;
+  replyCount?: number;
+  interestedCount?: number;
+  meetingCount?: number;
+  bounceCount?: number;
+  unsubscribeCount?: number;
 }
 
 export interface Campaign {
@@ -123,6 +132,7 @@ export interface Campaign {
   description: string;
   status: CampaignStatus;
   leadListId: string;
+  listId?: string;
   mailboxAccountIds: string[];
   schedule: CampaignSchedule;
   settings: CampaignSettings;
@@ -152,8 +162,15 @@ export interface MailboxAccount {
   provider: MailboxProvider;
   status: MailboxStatus;
   dailyLimit: number;
+  dailyQuota?: number;
   sentToday: number;
   warmupStatus: 'active' | 'paused' | 'disabled';
+  warmupEnabled?: boolean;
+  warmupDailyLimit?: number;
+  warmupSentToday?: number;
+  warmupRampupPerDay?: number;
+  warmupTargetDaily?: number;
+  reputationScore?: number;
   warmupScore: number;
   healthScore: number;
   signature: string;
@@ -175,6 +192,7 @@ export interface MailboxAccount {
   lastSyncAt: string;
   lastSentAt?: number;
   createdAt: string;
+  updatedAt?: string;
   isTestMailbox?: boolean;
   previewUrl?: string;
 }
@@ -219,6 +237,8 @@ export interface Conversation {
   assignedTo?: string;
   notes?: string;
   tags?: string[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export type DealStage =
@@ -311,14 +331,17 @@ export interface SendingJob {
   subject: string;
   body: string;
   scheduledAt: string;
+  scheduledFor?: string;
   status: SendingJobStatus;
   attempts: number;
   maxAttempts: number;
   nextAttemptAt?: string;
+  lastAttemptAt?: string;
   lastError?: string;
   errorDetails?: string;
   sentAt?: string;
   messageId?: string;
+  sentMessageId?: string;
   variantId?: string;
   variantName?: string;
   previewUrl?: string; // Preview URL for test mailboxes (Ethereal)
@@ -385,4 +408,95 @@ export interface WorkspaceSettings {
   companyName: string;
   complianceMode: 'gdpr' | 'canspam' | 'strict';
   globalSuppressionCount: number;
+}
+
+export interface Company {
+  id: string;
+  workspaceId?: string;
+  name: string;
+  domain: string;
+  industry: string;
+  leadCount?: number;
+  leadsCount?: number;
+  dealsCount?: number;
+  totalValue?: number;
+  employeeCount?: string;
+  location?: string;
+  phone?: string;
+  linkedinUrl?: string;
+  website?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface Task {
+  id: string;
+  workspaceId?: string;
+  title: string;
+  description?: string;
+  leadId?: string;
+  leadName?: string;
+  dealId?: string;
+  dueDate: string;
+  status: 'pending' | 'completed';
+  priority: 'low' | 'medium' | 'high';
+  assignedTo?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface ZeroCostStatus {
+  monthlyOperatingCost: number; // 0
+  currency?: string;
+  lifetimeFree?: boolean;
+  databaseType?: 'sqlite' | 'json';
+  sqlitePath?: string;
+  databaseSizeKb?: number;
+  freeMailboxesCount?: number;
+  dailyFreeQuotaUsed?: number;
+  dailyFreeQuotaLimit?: number;
+  geminiFreeTierStatus?: 'active' | 'not_configured';
+  storage?: {
+    engine: string;
+    type: string;
+    path: string;
+    sizeKb: number;
+    isZeroCost: boolean;
+    recordCounts: Record<string, number>;
+  };
+  freeEmailProviders?: {
+    id: string;
+    name: string;
+    dailyQuota: string;
+    cost: string;
+    status: string;
+    description: string;
+  }[];
+  freeAiTier?: {
+    name: string;
+    model: string;
+    freeQuota: string;
+    cost: string;
+    status: string;
+    description: string;
+  };
+  localFeatures?: {
+    name: string;
+    cost: string;
+    status: string;
+    note: string;
+  }[];
+  optionalServicesDisabled?: {
+    name: string;
+    status: string;
+    cost: string;
+    savings: string;
+  }[];
+  optionalServices?: {
+    name: string;
+    type: string;
+    status: 'free_built_in' | 'optional_disabled' | 'optional_active';
+    description: string;
+  }[];
 }

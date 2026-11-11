@@ -11,19 +11,67 @@ import {
   MapPin,
   FileText,
   AlertTriangle,
+  Database,
+  RotateCw,
+  HardDrive,
+  Lock,
+  LogOut,
+  RefreshCw,
+  Archive,
+  CheckCircle2,
 } from 'lucide-react';
 import { WorkspaceSettings } from '../types';
+
+interface BackupItem {
+  filename: string;
+  filepath: string;
+  sizeKb: number;
+  createdAt: string;
+}
 
 export const SettingsPage: React.FC = () => {
   const [workspace, setWorkspace] = useState<WorkspaceSettings | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
+  // Backup & SQLite State
+  const [backups, setBackups] = useState<BackupItem[]>([]);
+  const [isBackingUp, setIsBackingUp] = useState(false);
+  const [backupMessage, setBackupMessage] = useState<string | null>(null);
+  const [integrityStatus, setIntegrityStatus] = useState<string | null>(null);
+  const [isCheckingIntegrity, setIsCheckingIntegrity] = useState(false);
+  const [storageStats, setStorageStats] = useState<any>(null);
+
+  const fetchBackups = async () => {
+    try {
+      const res = await fetch('/api/database/backups');
+      if (res.ok) {
+        const data = await res.json();
+        setBackups(data.backups || []);
+      }
+    } catch (e) {
+      console.error('Failed to load backups:', e);
+    }
+  };
+
+  const fetchStorageStats = async () => {
+    try {
+      const res = await fetch('/api/budget/status');
+      if (res.ok) {
+        const data = await res.json();
+        setStorageStats(data.storage);
+      }
+    } catch (_) {}
+  };
+
   useEffect(() => {
     fetch('/api/workspace')
       .then((res) => res.json())
       .then((data) => setWorkspace(data.workspace))
       .catch((err) => console.error(err));
+
+    fetchBackups();
+    fetchStorageStats();
   }, []);
 
   const handleSave = async (e: React.FormEvent) => {
@@ -45,6 +93,70 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  const handleCreateBackup = async () => {
+    setIsBackingUp(true);
+    setBackupMessage(null);
+    try {
+      const res = await fetch('/api/database/backup', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setBackupMessage(`Backup successfully created: ${data.backup.filename}`);
+        fetchBackups();
+        setTimeout(() => setBackupMessage(null), 4000);
+      } else {
+        setBackupMessage(`Backup error: ${data.error}`);
+      }
+    } catch (err: any) {
+      setBackupMessage(`Backup failed: ${err.message}`);
+    } finally {
+      setIsBackingUp(false);
+    }
+  };
+
+  const handleCheckIntegrity = async () => {
+    setIsCheckingIntegrity(true);
+    try {
+      const res = await fetch('/api/database/integrity');
+      const data = await res.json();
+      setIntegrityStatus(data.ok ? 'Integrity Check Passed (Database Healthy)' : `Issue: ${data.message}`);
+    } catch (err: any) {
+      setIntegrityStatus(`Check failed: ${err.message}`);
+    } finally {
+      setIsCheckingIntegrity(false);
+    }
+  };
+
+  const handleRestoreBackup = async (filename: string) => {
+    if (!window.confirm(`Are you sure you want to restore from ${filename}? Active database will be safely replaced with this snapshot.`)) {
+      return;
+    }
+    try {
+      const res = await fetch('/api/database/restore', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(data.message);
+        window.location.reload();
+      } else {
+        alert(`Restore failed: ${data.message}`);
+      }
+    } catch (err: any) {
+      alert(`Restore failed: ${err.message}`);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      window.location.reload();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   if (!workspace) {
     return <div className="p-6 text-slate-400 text-xs">Loading workspace settings...</div>;
   }
@@ -55,18 +167,27 @@ export const SettingsPage: React.FC = () => {
       <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-            Workspace Settings & Compliance
+            Workspace Settings & Local Database
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            Manage organization profile, physical compliance addresses, unsubscribe footers, and security safeguards.
+            Organization profile, local SQLite database management, automated backups, and CAN-SPAM compliance footers.
           </p>
         </div>
 
-        {saveSuccess && (
-          <span className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-lg animate-fade-in font-medium">
-            <Check className="h-4 w-4" /> Settings Saved
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          {saveSuccess && (
+            <span className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-lg animate-fade-in font-medium">
+              <Check className="h-4 w-4" /> Settings Saved
+            </span>
+          )}
+          <button
+            onClick={handleLogout}
+            className="rounded-lg bg-slate-800/80 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition cursor-pointer"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            Sign Out Local Session
+          </button>
+        </div>
       </div>
 
       <form onSubmit={handleSave} className="space-y-6 text-xs">
@@ -101,52 +222,160 @@ export const SettingsPage: React.FC = () => {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-slate-400 mb-1">Owner Email Address</label>
+              <label className="block text-slate-400 mb-1">Primary Owner Email</label>
               <input
                 type="email"
-                disabled
                 value={workspace.ownerEmail}
-                className="w-full rounded-lg bg-slate-800/50 border border-slate-800 px-3 py-2 text-slate-400 font-mono"
+                onChange={(e) => setWorkspace({ ...workspace, ownerEmail: e.target.value })}
+                className="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-slate-100 font-mono"
               />
             </div>
 
             <div>
-              <label className="block text-slate-400 mb-1">Workspace Timezone</label>
+              <label className="block text-slate-400 mb-1">Default Sending Timezone</label>
               <select
                 value={workspace.timezone}
                 onChange={(e) => setWorkspace({ ...workspace, timezone: e.target.value })}
                 className="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-slate-100"
               >
                 <option value="America/Los_Angeles">Pacific Time (US & Canada)</option>
-                <option value="America/New_York">Eastern Time (US & Canada)</option>
+                <option value="America/Denver">Mountain Time (US & Canada)</option>
                 <option value="America/Chicago">Central Time (US & Canada)</option>
-                <option value="Europe/London">London (GMT/BST)</option>
-                <option value="Europe/Berlin">Berlin / Paris (CET)</option>
+                <option value="America/New_York">Eastern Time (US & Canada)</option>
+                <option value="Europe/London">London / GMT</option>
+                <option value="Europe/Paris">Central European Time</option>
+                <option value="Asia/Tokyo">Tokyo / JST</option>
               </select>
             </div>
           </div>
         </div>
 
-        {/* CAN-SPAM & GDPR MANDATORY COMPLIANCE */}
+        {/* Local SQLite Database & Backup Management */}
+        <div className="surface-card rounded-xl p-5 space-y-4 border border-blue-500/20">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                <Database className="h-4 w-4 text-emerald-400" />
+                Local SQLite Database & Automated Backup System
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                OutboundOS operates locally with zero cloud dependencies. Your database is stored outside source control in local application data.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={handleCheckIntegrity}
+                disabled={isCheckingIntegrity}
+                className="rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 text-xs text-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+              >
+                <RotateCw className={`h-3.5 w-3.5 ${isCheckingIntegrity ? 'animate-spin' : ''}`} />
+                Integrity Check
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCreateBackup}
+                disabled={isBackingUp}
+                className="rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium px-3.5 py-1.5 text-xs flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+              >
+                <Archive className="h-3.5 w-3.5" />
+                {isBackingUp ? 'Backing Up...' : 'Create SQLite Backup'}
+              </button>
+            </div>
+          </div>
+
+          {backupMessage && (
+            <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+              <span>{backupMessage}</span>
+            </div>
+          )}
+
+          {integrityStatus && (
+            <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-300 text-xs flex items-center gap-2">
+              <Shield className="h-4 w-4 text-blue-400 shrink-0" />
+              <span>{integrityStatus}</span>
+            </div>
+          )}
+
+          <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-4 space-y-2 text-xs font-mono">
+            <div className="flex justify-between items-center text-slate-300">
+              <span className="text-slate-500">Database Driver:</span>
+              <span className="text-emerald-400 font-bold">better-sqlite3 (WAL Mode & Foreign Keys ON)</span>
+            </div>
+            <div className="flex justify-between items-center text-slate-300">
+              <span className="text-slate-500">Windows Storage Path:</span>
+              <span className="text-slate-200 truncate max-w-md">{storageStats?.path || '%LOCALAPPDATA%\\OutboundOS\\data\\outboundos.sqlite'}</span>
+            </div>
+            <div className="flex justify-between items-center text-slate-300">
+              <span className="text-slate-500">Secret Encryption Key:</span>
+              <span className="text-purple-400">AES-256-GCM (stored in data/.secret_key)</span>
+            </div>
+          </div>
+
+          {/* Existing Backups Table */}
+          <div className="space-y-2 pt-2">
+            <h4 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+              <Archive className="h-3.5 w-3.5 text-slate-400" />
+              Available Database Backups ({backups.length})
+            </h4>
+
+            <div className="rounded-lg border border-slate-800 bg-slate-900/40 overflow-hidden">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-slate-800 text-slate-400 bg-slate-900/80">
+                    <th className="py-2 px-3 font-medium">Backup Filename</th>
+                    <th className="py-2 px-3 font-medium">Created Date</th>
+                    <th className="py-2 px-3 font-medium">Size</th>
+                    <th className="py-2 px-3 text-right font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
+                  {backups.map((b) => (
+                    <tr key={b.filename} className="hover:bg-slate-900/40">
+                      <td className="py-2 px-3 text-slate-200 font-bold">{b.filename}</td>
+                      <td className="py-2 px-3 text-slate-400">{new Date(b.createdAt).toLocaleString()}</td>
+                      <td className="py-2 px-3 text-emerald-400">{b.sizeKb} KB</td>
+                      <td className="py-2 px-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() => handleRestoreBackup(b.filename)}
+                          className="text-blue-400 hover:text-blue-300 text-xs font-semibold cursor-pointer underline"
+                        >
+                          Restore
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {backups.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-6 text-center text-slate-500 text-xs font-sans">
+                        No manual backups created yet. Click "Create SQLite Backup" above to generate a safe snapshot.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* CAN-SPAM & Physical Compliance */}
         <div className="surface-card rounded-xl p-5 space-y-4">
           <h3 className="text-sm font-semibold text-white flex items-center gap-2">
             <Shield className="h-4 w-4 text-emerald-400" />
-            Mandatory Deliverability & Anti-Spam Compliance Settings
+            CAN-SPAM & Legal Compliance Safeguards
           </h3>
-          <p className="text-slate-400 text-xs">
-            International cold email regulations (CAN-SPAM Act, CASL, and GDPR) mandate an accurate physical business mailing address and an accessible opt-out mechanism in every outbound communication.
-          </p>
 
           <div>
-            <label className="block text-slate-400 mb-1">
-              Physical Business Mailing Address *
-            </label>
+            <label className="block text-slate-400 mb-1">Physical Business Street Address (Mandatory for CAN-SPAM)</label>
             <input
               type="text"
-              required
               value={workspace.physicalAddress}
               onChange={(e) => setWorkspace({ ...workspace, physicalAddress: e.target.value })}
-              className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-2 text-slate-100 focus:outline-none focus:border-blue-500/60"
+              className="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-slate-100"
             />
           </div>
 
@@ -171,29 +400,6 @@ export const SettingsPage: React.FC = () => {
               <option value="canspam">CAN-SPAM Standard (US compliance)</option>
               <option value="gdpr">GDPR B2B (Legitimate Interest + Right to erasure)</option>
             </select>
-          </div>
-        </div>
-
-        {/* Team Members & Roles */}
-        <div className="surface-card rounded-xl p-5 space-y-3">
-          <h3 className="text-sm font-semibold text-white flex items-center gap-2">
-            <Users className="h-4 w-4 text-cyan-400" />
-            Team Members & Role-Based Access
-          </h3>
-
-          <div className="rounded-lg bg-slate-800/40 border border-slate-700/60 p-3 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-700 text-slate-200 font-bold text-xs">
-                AK
-              </div>
-              <div>
-                <span className="font-semibold text-white block">Azeem Khawer</span>
-                <span className="text-[11px] text-slate-400 font-mono">azeemkhawer4@gmail.com</span>
-              </div>
-            </div>
-            <span className="rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 px-2 py-0.5 text-[10px] font-bold uppercase">
-              Primary Owner
-            </span>
           </div>
         </div>
 

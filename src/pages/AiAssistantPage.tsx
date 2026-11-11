@@ -66,7 +66,7 @@ export const AiAssistantPage: React.FC = () => {
           ...nextMessages,
           {
             role: 'assistant',
-            content: 'I encountered an error generating the outreach strategy. Please try again.',
+            content: data.error || 'I encountered an error generating the outreach strategy. Please try again.',
           },
         ]);
       }

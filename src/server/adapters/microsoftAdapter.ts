@@ -1,5 +1,6 @@
 import { MailboxAccount, MailboxOAuthConfig, FailureType, InboundMessage } from '../../types';
 import { AdapterSendResult } from './gmailAdapter';
+import { decryptSecret } from '../db/crypto';
 
 /**
  * Refreshes an expired Microsoft Graph OAuth access token using the stored refresh_token
@@ -9,11 +10,12 @@ export async function refreshMicrosoftToken(
 ): Promise<{ accessToken: string; expiresAt: number } | null> {
   if (!oauth.refreshToken) return null;
 
+  const actualRefreshToken = decryptSecret(oauth.refreshToken);
   const clientId = oauth.clientId || process.env.MICROSOFT_CLIENT_ID;
   const clientSecret = oauth.clientSecret || process.env.MICROSOFT_CLIENT_SECRET;
   const tenantId = oauth.tenantId || process.env.MICROSOFT_TENANT_ID || 'common';
 
-  if (!clientId || !clientSecret) {
+  if (!clientId || !clientSecret || !actualRefreshToken) {
     return null;
   }
 
@@ -24,7 +26,7 @@ export async function refreshMicrosoftToken(
       body: new URLSearchParams({
         client_id: clientId,
         client_secret: clientSecret,
-        refresh_token: oauth.refreshToken,
+        refresh_token: actualRefreshToken,
         grant_type: 'refresh_token',
         scope: 'https://graph.microsoft.com/.default offline_access',
       }),

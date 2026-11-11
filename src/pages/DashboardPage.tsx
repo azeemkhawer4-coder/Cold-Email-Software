@@ -47,15 +47,21 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 }) => {
   const [dateRange, setDateRange] = useState<'today' | '7d' | '30d' | '90d'>('7d');
 
+  // Defensive guards for array inputs
+  const safeLeads = Array.isArray(leads) ? leads : [];
+  const safeCampaigns = Array.isArray(campaigns) ? campaigns : [];
+  const safeMailboxes = Array.isArray(mailboxes) ? mailboxes : [];
+  const safeConversations = Array.isArray(conversations) ? conversations : [];
+
   // Aggregated real metrics from database
-  const totalLeads = leads.length;
-  const totalSent = campaigns.reduce((acc, c) => acc + (c.stats.sent || 0), 0);
-  const totalDelivered = campaigns.reduce((acc, c) => acc + (c.stats.delivered || 0), 0);
-  const totalReplies = campaigns.reduce((acc, c) => acc + (c.stats.replied || 0), 0);
-  const positiveReplies = campaigns.reduce((acc, c) => acc + (c.stats.positiveReplies || 0), 0);
-  const totalBounced = campaigns.reduce((acc, c) => acc + (c.stats.bounced || 0), 0);
-  const totalMeetings = campaigns.reduce((acc, c) => acc + (c.stats.meetingsBooked || 0), 0);
-  const activeCampaignsCount = campaigns.filter((c) => c.status === 'active').length;
+  const totalLeads = safeLeads.length;
+  const totalSent = safeCampaigns.reduce((acc, c) => acc + (c?.stats?.sent || c?.stats?.sentCount || 0), 0);
+  const totalDelivered = safeCampaigns.reduce((acc, c) => acc + (c?.stats?.delivered || c?.stats?.deliveredCount || 0), 0);
+  const totalReplies = safeCampaigns.reduce((acc, c) => acc + (c?.stats?.replied || c?.stats?.replyCount || 0), 0);
+  const positiveReplies = safeCampaigns.reduce((acc, c) => acc + (c?.stats?.positiveReplies || c?.stats?.interestedCount || 0), 0);
+  const totalBounced = safeCampaigns.reduce((acc, c) => acc + (c?.stats?.bounced || c?.stats?.bounceCount || 0), 0);
+  const totalMeetings = safeCampaigns.reduce((acc, c) => acc + (c?.stats?.meetingsBooked || c?.stats?.meetingCount || 0), 0);
+  const activeCampaignsCount = safeCampaigns.filter((c) => c?.status === 'active').length;
 
   const bounceRate = totalSent > 0 ? ((totalBounced / totalSent) * 100).toFixed(1) : '0.0';
   const replyRate = totalDelivered > 0 ? ((totalReplies / totalDelivered) * 100).toFixed(1) : '0.0';
@@ -233,8 +239,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </p>
 
             <div className="space-y-3">
-              {mailboxes.map((mb) => {
-                const usedPct = Math.min(100, Math.round((mb.sentToday / mb.dailyLimit) * 100));
+              {safeMailboxes.map((mb) => {
+                const limit = mb.dailyLimit || mb.dailyQuota || 50;
+                const sent = mb.sentToday || 0;
+                const usedPct = Math.min(100, Math.round((sent / Math.max(1, limit)) * 100));
+                const warmup = mb.warmupScore ?? 95;
+                const health = mb.healthScore ?? 98;
                 return (
                   <div key={mb.id} className="rounded-lg bg-slate-900/60 border border-slate-800 p-3">
                     <div className="flex items-center justify-between text-xs">
@@ -243,7 +253,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                         <span className="font-medium text-slate-200 truncate">{mb.email}</span>
                       </div>
                       <span className="text-slate-400 font-mono text-[11px] tabular-nums">
-                        {mb.sentToday} / {mb.dailyLimit}
+                        {sent} / {limit}
                       </span>
                     </div>
                     {/* Progress Bar */}
@@ -255,9 +265,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     </div>
                     <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
                       <span className="flex items-center gap-1">
-                        <Flame className="h-3 w-3 text-amber-400" /> Warmup: <span className="font-mono text-slate-300 tabular-nums">{mb.warmupScore}%</span>
+                        <Flame className="h-3 w-3 text-amber-400" /> Warmup: <span className="font-mono text-slate-300 tabular-nums">{warmup}%</span>
                       </span>
-                      <span className="text-emerald-400">Health: <span className="font-mono tabular-nums">{mb.healthScore}%</span></span>
+                      <span className="text-emerald-400">Health: <span className="font-mono tabular-nums">{health}%</span></span>
                     </div>
                   </div>
                 );
@@ -269,7 +279,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <span className="flex items-center gap-1.5">
               <ShieldCheck className="h-4 w-4 text-emerald-400" /> SPF, DKIM, DMARC 100%
             </span>
-            <span className="text-slate-300 font-medium font-mono text-[11px]">{mailboxes.length} Mailboxes</span>
+            <span className="text-slate-300 font-medium font-mono text-[11px]">{safeMailboxes.length} Mailboxes</span>
           </div>
         </div>
       </div>
@@ -283,11 +293,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <h3 className="text-sm font-semibold text-white">Recent Inbound Conversations</h3>
               <p className="text-xs text-slate-400">Incoming replies triaged by AI sentiment engine</p>
             </div>
-            <span className="text-xs font-mono font-medium text-blue-400 tabular-nums">{conversations.length} Threads</span>
+            <span className="text-xs font-mono font-medium text-blue-400 tabular-nums">{safeConversations.length} Threads</span>
           </div>
 
           <div className="space-y-2.5">
-            {conversations.slice(0, 4).map((conv) => (
+            {safeConversations.slice(0, 4).map((conv) => (
               <div
                 key={conv.id}
                 onClick={() => onOpenConversation(conv.id)}
@@ -295,8 +305,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               >
                 <div className="flex-1 truncate pr-3">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-slate-200">{conv.leadName}</span>
-                    <span className="text-[10px] text-slate-400 truncate">({conv.leadCompany})</span>
+                    <span className="text-xs font-semibold text-slate-200">{conv.leadName || 'Lead'}</span>
+                    <span className="text-[10px] text-slate-400 truncate">({conv.leadCompany || 'Company'})</span>
                     <span
                       className={`rounded px-1.5 py-0.2 text-[9px] font-semibold uppercase ${
                         conv.category === 'interested'
@@ -308,11 +318,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                           : 'bg-slate-800 text-slate-300 border border-slate-700'
                       }`}
                     >
-                      {conv.category.replace(/_/g, ' ')}
+                      {(conv.category || 'general').replace(/_/g, ' ')}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-slate-300 truncate font-mono">{conv.subject}</p>
-                  <p className="mt-0.5 text-[11px] text-slate-400 truncate">{conv.snippet}</p>
+                  <p className="mt-1 text-xs text-slate-300 truncate font-mono">{conv.subject || 'No Subject'}</p>
+                  <p className="mt-0.5 text-[11px] text-slate-400 truncate">{conv.snippet || ''}</p>
                 </div>
                 <ArrowUpRight className="h-4 w-4 text-slate-500 shrink-0 mt-1" />
               </div>
@@ -336,48 +346,56 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
 
           <div className="space-y-3">
-            {campaigns.map((camp) => (
-              <div
-                key={camp.id}
-                onClick={() => onSelectCampaign(camp.id)}
-                className="rounded-lg bg-slate-900/60 border border-slate-800 p-3.5 hover:bg-slate-800/60 hover:border-slate-700 transition cursor-pointer"
-              >
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-slate-200">{camp.name}</span>
-                    <span
-                      className={`rounded px-1.5 py-0.2 text-[9px] font-semibold uppercase ${
-                        camp.status === 'active'
-                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                          : 'bg-slate-800 text-slate-300 border border-slate-700'
-                      }`}
-                    >
-                      {camp.status}
-                    </span>
-                  </div>
-                  <span className="text-[11px] text-slate-400 font-mono tabular-nums">{camp.steps.length} Steps</span>
-                </div>
+            {safeCampaigns.map((camp) => {
+              const stepCount = (camp.steps || (camp as any).sequenceSteps || []).length;
+              const sent = camp.stats?.sent ?? camp.stats?.sentCount ?? 0;
+              const delivered = camp.stats?.delivered ?? camp.stats?.deliveredCount ?? 0;
+              const replied = camp.stats?.replied ?? camp.stats?.replyCount ?? 0;
+              const meetings = camp.stats?.meetingsBooked ?? camp.stats?.meetingCount ?? 0;
 
-                <div className="grid grid-cols-4 gap-2 text-center text-xs mt-3 pt-2.5 border-t border-slate-800">
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">Sent</span>
-                    <span className="font-semibold text-slate-200 font-mono tabular-nums">{camp.stats.sent}</span>
+              return (
+                <div
+                  key={camp.id}
+                  onClick={() => onSelectCampaign(camp.id)}
+                  className="rounded-lg bg-slate-900/60 border border-slate-800 p-3.5 hover:bg-slate-800/60 hover:border-slate-700 transition cursor-pointer"
+                >
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-semibold text-slate-200">{camp.name || 'Untitled Campaign'}</span>
+                      <span
+                        className={`rounded px-1.5 py-0.2 text-[9px] font-semibold uppercase ${
+                          camp.status === 'active'
+                            ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                            : 'bg-slate-800 text-slate-300 border border-slate-700'
+                        }`}
+                      >
+                        {camp.status || 'draft'}
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-slate-400 font-mono tabular-nums">{stepCount} Steps</span>
                   </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">Delivered</span>
-                    <span className="font-semibold text-cyan-400 font-mono tabular-nums">{camp.stats.delivered}</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">Replies</span>
-                    <span className="font-semibold text-indigo-400 font-mono tabular-nums">{camp.stats.replied}</span>
-                  </div>
-                  <div>
-                    <span className="text-[10px] text-slate-400 block">Meetings</span>
-                    <span className="font-semibold text-emerald-400 font-mono tabular-nums">{camp.stats.meetingsBooked}</span>
+
+                  <div className="grid grid-cols-4 gap-2 text-center text-xs mt-3 pt-2.5 border-t border-slate-800">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Sent</span>
+                      <span className="font-semibold text-slate-200 font-mono tabular-nums">{sent}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Delivered</span>
+                      <span className="font-semibold text-cyan-400 font-mono tabular-nums">{delivered}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Replies</span>
+                      <span className="font-semibold text-indigo-400 font-mono tabular-nums">{replied}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">Meetings</span>
+                      <span className="font-semibold text-emerald-400 font-mono tabular-nums">{meetings}</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>

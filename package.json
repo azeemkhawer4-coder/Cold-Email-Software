@@ -1,22 +1,25 @@
 {
-  "name": "react-example",
+  "name": "outboundos",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
     "start": "tsx server.ts",
     "build": "vite build",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "node -e \"import('fs').then(fs => fs.rmSync('dist', { recursive: true, force: true }))\"",
+    "test": "tsx --test src/server/sqlite.test.ts src/server/sequence.test.ts src/server/workflow.test.ts src/server/queue.test.ts src/utils/templateEngine.test.ts src/utils/senderRotation.test.ts src/utils/emailValidator.test.ts",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
     "@tailwindcss/vite": "^4.3.3",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/canvas-confetti": "^1.9.0",
     "@types/nodemailer": "^8.0.2",
     "@vitejs/plugin-react": "^6.1.1",
+    "better-sqlite3": "^13.1.1",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.3",

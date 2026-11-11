@@ -578,7 +578,7 @@
       "provider": "smtp",
       "status": "connected",
       "dailyLimit": 100,
-      "sentToday": 0,
+      "sentToday": 1,
       "warmupStatus": "active",
       "warmupScore": 100,
       "healthScore": 100,
@@ -593,10 +593,11 @@
       "imapUser": "f6i7usbpcjo5uvml@ethereal.email",
       "imapPass": "ufnEWAfYCuREGpBQfy",
       "imapSecure": true,
-      "lastSyncAt": "2026-11-10T20:44:30.148Z",
+      "lastSyncAt": "2026-11-11T19:29:24.228Z",
       "createdAt": "2026-11-10T20:44:30.148Z",
       "isTestMailbox": true,
-      "previewUrl": "https://ethereal.email/messages"
+      "previewUrl": "https://ethereal.email/messages",
+      "lastSentAt": 1794420655281
     },
     {
       "id": "mb-test-1794330039266",
@@ -621,7 +622,7 @@
       "imapUser": "d7lglo4qp23uu4sx@ethereal.email",
       "imapPass": "4Ar2FPz3tjTQvBjQbb",
       "imapSecure": true,
-      "lastSyncAt": "2026-11-10T20:42:30.614Z",
+      "lastSyncAt": "2026-11-11T19:29:27.887Z",
       "createdAt": "2026-11-10T17:00:39.266Z",
       "isTestMailbox": true,
       "previewUrl": "https://ethereal.email/messages",
@@ -650,7 +651,7 @@
       "imapUser": "h35kdurs4rho3pei@ethereal.email",
       "imapPass": "sW6Eg5Sc3XR216hrhX",
       "imapSecure": true,
-      "lastSyncAt": "2026-11-10T20:42:33.618Z",
+      "lastSyncAt": "2026-11-11T19:29:31.562Z",
       "createdAt": "2026-11-09T20:15:22.739Z",
       "isTestMailbox": true,
       "previewUrl": "https://ethereal.email/messages",
@@ -679,7 +680,7 @@
       "imapUser": "sryb3j3rgjerum2u@ethereal.email",
       "imapPass": "5af7AD7PkK2WxgpV3W",
       "imapSecure": true,
-      "lastSyncAt": "2026-11-10T20:42:36.569Z",
+      "lastSyncAt": "2026-11-11T19:29:35.241Z",
       "createdAt": "2026-11-09T20:12:21.039Z",
       "isTestMailbox": true,
       "previewUrl": "https://ethereal.email/messages"
@@ -707,7 +708,7 @@
       "imapUser": "sryb3j3rgjerum2u@ethereal.email",
       "imapPass": "5af7AD7PkK2WxgpV3W",
       "imapSecure": true,
-      "lastSyncAt": "2026-11-10T20:42:39.357Z",
+      "lastSyncAt": "2026-11-11T19:28:38.376Z",
       "createdAt": "2026-11-09T20:12:16.704Z",
       "isTestMailbox": true,
       "previewUrl": "https://ethereal.email/messages"
@@ -735,7 +736,7 @@
       "imapUser": "mumbrddwndfchkqf@ethereal.email",
       "imapPass": "dvJHFSKDFqF18EZpdD",
       "imapSecure": true,
-      "lastSyncAt": "2026-11-10T20:42:42.151Z",
+      "lastSyncAt": "2026-11-11T19:28:42.072Z",
       "createdAt": "2026-11-09T20:12:08.620Z",
       "isTestMailbox": true,
       "previewUrl": "https://ethereal.email/messages",
@@ -764,7 +765,7 @@
       "imapUser": "lflgjpxldq5zb42i@ethereal.email",
       "imapPass": "T9QQ1zU6myWQ212jE2",
       "imapSecure": true,
-      "lastSyncAt": "2026-11-10T20:42:44.943Z",
+      "lastSyncAt": "2026-11-11T19:28:45.736Z",
       "createdAt": "2026-11-09T20:09:32.783Z",
       "isTestMailbox": true,
       "previewUrl": "https://ethereal.email/messages",
@@ -793,7 +794,7 @@
       "imapUser": "ef5d3ghcqm34aism@ethereal.email",
       "imapPass": "4HhtWYK6eh11WSkKFr",
       "imapSecure": true,
-      "lastSyncAt": "2026-11-10T20:42:48.630Z",
+      "lastSyncAt": "2026-11-11T19:28:49.151Z",
       "createdAt": "2026-11-09T20:09:20.961Z",
       "isTestMailbox": true,
       "previewUrl": "https://ethereal.email/messages",
@@ -822,7 +823,7 @@
       "imapUser": "ooy3afcswf37q4oc@ethereal.email",
       "imapPass": "4QdmupSfDCt5CjsTFB",
       "imapSecure": true,
-      "lastSyncAt": "2026-11-10T20:42:52.316Z",
+      "lastSyncAt": "2026-11-11T19:28:52.838Z",
       "createdAt": "2026-11-09T20:08:52.708Z",
       "isTestMailbox": true,
       "previewUrl": "https://ethereal.email/messages"
@@ -850,7 +851,7 @@
       "imapUser": "ncc7rpfawvr6gdsi@ethereal.email",
       "imapPass": "jRhUsXMKCF6aaNn6Cc",
       "imapSecure": true,
-      "lastSyncAt": "2026-11-10T20:42:55.122Z",
+      "lastSyncAt": "2026-11-11T19:28:56.353Z",
       "createdAt": "2026-11-09T20:08:35.122Z",
       "isTestMailbox": true,
       "previewUrl": "https://ethereal.email/messages",
@@ -909,7 +910,7 @@
       "smtpPort": 587,
       "smtpUser": "postmaster@apexscale.com",
       "smtpSecure": false,
-      "lastSyncAt": "2026-11-10T20:42:55.122Z",
+      "lastSyncAt": "2026-11-11T19:28:56.353Z",
       "createdAt": "2026-10-28T14:00:00.000Z",
       "lastSentAt": 1794244458870
     }
@@ -1274,6 +1275,35 @@
           "isInbound": false
         }
       ]
+    },
+    {
+      "id": "conv-1794420655281-lead-1794343471259",
+      "workspaceId": "ws-apex-01",
+      "leadId": "lead-1794343471259",
+      "leadName": "Controlled Prospect",
+      "leadEmail": "prospect-1794343471259@example.com",
+      "leadCompany": "Prospect",
+      "campaignId": "camp-test-1794343471259",
+      "campaignName": "Controlled Test Campaign",
+      "mailboxId": "mb-test-1794343470148",
+      "mailboxEmail": "f6i7usbpcjo5uvml@ethereal.email",
+      "subject": "OutboundOS Controlled Delivery Verification",
+      "snippet": "<p>Testing real delivery over wire.</p>",
+      "status": "read",
+      "category": "general",
+      "lastMessageAt": "2026-11-11T18:10:52.298Z",
+      "messages": [
+        {
+          "id": "msg-1794420655281-iwgub",
+          "sender": "Controlled Test Mailbox (Ethereal)",
+          "senderEmail": "f6i7usbpcjo5uvml@ethereal.email",
+          "recipientEmail": "prospect-1794343471259@example.com",
+          "subject": "OutboundOS Controlled Delivery Verification",
+          "body": "<p>Testing real delivery over wire.</p>",
+          "timestamp": "2026-11-11T18:10:52.298Z",
+          "isInbound": false
+        }
+      ]
     }
   ],
   "deals": [
@@ -1629,11 +1659,14 @@
       "subject": "OutboundOS Controlled Delivery Verification",
       "body": "<p>Testing real delivery over wire.</p>",
       "scheduledAt": "2026-11-10T20:44:30.259Z",
-      "status": "queued",
-      "attempts": 0,
+      "status": "sent",
+      "attempts": 1,
       "maxAttempts": 3,
       "createdAt": "2026-11-10T20:44:31.260Z",
-      "updatedAt": "2026-11-10T20:44:31.260Z"
+      "updatedAt": "2026-11-11T18:10:55.280Z",
+      "messageId": "<56a7c15d-49c8-c56d-c56b-81734bada077@ethereal.email>",
+      "sentAt": "2026-11-11T18:10:55.280Z",
+      "previewUrl": "https://ethereal.email/message/avOCLhtP45yPS4-9avSvrxu0HW7Uflw0AAAABQrjEURGC57C1QhYi3gmu0k"
     }
   ],
   "sendingEvents": [
@@ -1750,6 +1783,21 @@
         "messageId": "<5328e9db-d2bb-5432-ca5d-1b13a7fd835d@ethereal.email>",
         "recipient": "prospect-1794330041852@example.com",
         "previewUrl": "https://ethereal.email/message/avNNtxtP45yPRBBbavN-9a.Q9n.M9yEwAAAAAoWlEzuBKa.0SRf-b5k5Te0",
+        "provider": "smtp"
+      }
+    },
+    {
+      "id": "evt-1794420655281-nzf9w",
+      "workspaceId": "ws-apex-01",
+      "campaignId": "camp-test-1794343471259",
+      "leadId": "lead-1794343471259",
+      "mailboxId": "mb-test-1794343470148",
+      "eventType": "sent",
+      "timestamp": "2026-11-11T18:10:52.298Z",
+      "metadata": {
+        "messageId": "<56a7c15d-49c8-c56d-c56b-81734bada077@ethereal.email>",
+        "recipient": "prospect-1794343471259@example.com",
+        "previewUrl": "https://ethereal.email/message/avOCLhtP45yPS4-9avSvrxu0HW7Uflw0AAAABQrjEURGC57C1QhYi3gmu0k",
         "provider": "smtp"
       }
     }

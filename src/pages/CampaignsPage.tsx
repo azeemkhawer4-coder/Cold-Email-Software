@@ -131,6 +131,19 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
         </button>
       </div>
 
+      {/* Autonomous Background Worker Status */}
+      <div className="rounded-xl bg-slate-900/60 border border-slate-800 px-4 py-2.5 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs">
+        <div className="flex items-center gap-2.5 text-slate-300">
+          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+          <span>
+            <strong className="text-white">Autonomous Background Worker Active:</strong> Campaigns execute on schedule whenever OutboundOS is running locally, even when this browser tab is closed.
+          </span>
+        </div>
+        <span className="text-[11px] font-mono text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 shrink-0">
+          $0.00 Relay Fees (Direct Provider Dispatch)
+        </span>
+      </div>
+
       {/* Campaigns Listing Table */}
       <div className="surface-card rounded-xl overflow-hidden">
         <table className="w-full text-left text-xs border-collapse">
@@ -147,17 +160,24 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800/60">
-            {campaigns.map((camp) => {
-              const emailStepsCount = camp.steps.filter((s) => s.type === 'email').length;
-              const hasConditions = camp.steps.some((s) => s.type === 'condition');
-              const hasVariants = camp.steps.some((s) => s.emailData?.variants && s.emailData.variants.length > 1);
+            {(campaigns || []).map((camp) => {
+              const campSteps = camp.steps || (camp as any).sequenceSteps || [];
+              const emailStepsCount = campSteps.filter((s: any) => s.type === 'email').length;
+              const hasConditions = campSteps.some((s: any) => s.type === 'condition');
+              const hasVariants = campSteps.some((s: any) => s.emailData?.variants && s.emailData.variants.length > 1);
+              const enrolled = camp.stats?.enrolled ?? camp.stats?.totalLeads ?? 0;
+              const sent = camp.stats?.sent ?? camp.stats?.sentCount ?? 0;
+              const delivered = camp.stats?.delivered ?? camp.stats?.deliveredCount ?? 0;
+              const replied = camp.stats?.replied ?? camp.stats?.replyCount ?? 0;
+              const positiveReplies = camp.stats?.positiveReplies ?? camp.stats?.interestedCount ?? 0;
+              const meetingsBooked = camp.stats?.meetingsBooked ?? camp.stats?.meetingCount ?? 0;
 
               return (
                 <tr key={camp.id} className="hover:bg-slate-800/30 transition">
                   <td className="py-3 px-4">
                     <div className="flex flex-col">
-                      <span className="font-semibold text-slate-100 text-sm">{camp.name}</span>
-                      <span className="text-[11px] text-slate-400 truncate max-w-sm">{camp.description}</span>
+                      <span className="font-semibold text-slate-100 text-sm">{camp.name || 'Untitled Campaign'}</span>
+                      <span className="text-[11px] text-slate-400 truncate max-w-sm">{camp.description || ''}</span>
                     </div>
                   </td>
                   <td className="py-3 px-4">
@@ -171,12 +191,12 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
                       }`}
                     >
                       <span className={`h-1.5 w-1.5 rounded-full ${camp.status === 'active' ? 'bg-emerald-400' : 'bg-slate-500'}`} />
-                      {camp.status}
+                      {camp.status || 'draft'}
                     </span>
                   </td>
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-slate-300 font-mono tabular-nums">{camp.steps.length} Steps</span>
+                      <span className="text-slate-300 font-mono tabular-nums">{campSteps.length} Steps</span>
                       <span className="text-slate-600">•</span>
                       <span className="text-blue-400 font-mono">{emailStepsCount} Emails</span>
                       {hasConditions && (
@@ -193,16 +213,16 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
                       )}
                     </div>
                   </td>
-                  <td className="py-3 px-4 text-slate-300 font-mono tabular-nums">{camp.stats.enrolled}</td>
+                  <td className="py-3 px-4 text-slate-300 font-mono tabular-nums">{enrolled}</td>
                   <td className="py-3 px-4">
-                    <span className="text-slate-100 font-mono font-medium tabular-nums">{camp.stats.sent}</span>
-                    <span className="text-slate-500 text-[10px] block font-mono">({camp.stats.delivered} delivered)</span>
+                    <span className="text-slate-100 font-mono font-medium tabular-nums">{sent}</span>
+                    <span className="text-slate-500 text-[10px] block font-mono">({delivered} delivered)</span>
                   </td>
                   <td className="py-3 px-4">
-                    <span className="text-indigo-400 font-mono font-semibold tabular-nums">{camp.stats.replied}</span>
-                    <span className="text-emerald-400 text-[10px] block font-mono font-medium">({camp.stats.positiveReplies} positive)</span>
+                    <span className="text-indigo-400 font-mono font-semibold tabular-nums">{replied}</span>
+                    <span className="text-emerald-400 text-[10px] block font-mono font-medium">({positiveReplies} positive)</span>
                   </td>
-                  <td className="py-3 px-4 text-emerald-400 font-bold font-mono tabular-nums">{camp.stats.meetingsBooked}</td>
+                  <td className="py-3 px-4 text-emerald-400 font-bold font-mono tabular-nums">{meetingsBooked}</td>
                   <td className="py-3 px-4 text-right">
                     <div className="flex items-center justify-end gap-1.5">
                       {camp.status === 'active' ? (
