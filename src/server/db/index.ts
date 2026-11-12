@@ -179,18 +179,15 @@ function seedInitialDataIfEmpty(db: Database.Database): void {
       companySize: '5,000+ employees',
       source: 'CSV Upload',
       verificationStatus: 'valid',
-      status: 'interested',
+      status: 'new',
       assignedOwner: 'Azeem Khawer',
       customFields: { tech_stack: 'Kubernetes, AWS', quarterly_priority: 'Infrastructure Cost Optimization' },
-      notes: 'Replied positively asking for a 15-minute demo next Tuesday.',
-      tags: ['Enterprise', 'High Priority', 'Warm Reply'],
+      notes: 'Initial imported target prospect.',
+      tags: ['Enterprise', 'Target Lead'],
       dateAdded: now,
-      lastContacted: now,
-      lastReply: now,
       unsubscribeStatus: false,
       bounceStatus: false,
       listId: 'list-saas-founders',
-      campaignId: 'camp-q4-enterprise',
     },
     {
       id: 'lead-2',
@@ -211,18 +208,15 @@ function seedInitialDataIfEmpty(db: Database.Database): void {
       companySize: '8,000+ employees',
       source: 'Domain Prospecting',
       verificationStatus: 'valid',
-      status: 'meeting_booked',
+      status: 'new',
       assignedOwner: 'Azeem Khawer',
       customFields: { tech_stack: 'Ruby, Go, Envoy', quarterly_priority: 'Developer Tooling' },
-      notes: 'Meeting booked for Thursday 2pm PST.',
-      tags: ['Enterprise', 'FinTech', 'Demo Scheduled'],
+      notes: 'Qualified engineering decision-maker.',
+      tags: ['Enterprise', 'FinTech'],
       dateAdded: now,
-      lastContacted: now,
-      lastReply: now,
       unsubscribeStatus: false,
       bounceStatus: false,
       listId: 'list-saas-founders',
-      campaignId: 'camp-q4-enterprise',
     },
   ];
 
@@ -313,19 +307,20 @@ function seedInitialDataIfEmpty(db: Database.Database): void {
   }
 
   // 5. Initial Campaign
+  // 5. Initial Campaign Template (Draft Only, Unsent, Zero Fake Metrics)
   const sampleCampaign: Campaign = {
-    id: 'camp-q4-enterprise',
+    id: 'camp-template-draft',
     workspaceId: workspace.id,
-    name: 'Q4 Enterprise SaaS — Platform Infrastructure',
-    description: 'Outbound sequence for enterprise SaaS infrastructure leaders',
-    status: 'active',
+    name: 'SaaS Infrastructure Outreach Template',
+    description: 'Customizable outbound sequence template for technical decision makers',
+    status: 'draft',
     leadListId: 'list-saas-founders',
     listId: 'list-saas-founders',
-    mailboxAccountIds: ['mb-primary-google', 'mb-custom-smtp'],
+    mailboxAccountIds: [],
     settings: {
-      dailyLimit: 100,
-      maxNewLeadsPerDay: 50,
-      maxPerDomainPerDay: 2,
+      dailyLimit: 50,
+      maxNewLeadsPerDay: 25,
+      maxPerDomainPerDay: 1,
       mailboxRotation: 'balanced',
       stopOnReply: true,
       stopOnUnsubscribe: true,
@@ -334,52 +329,52 @@ function seedInitialDataIfEmpty(db: Database.Database): void {
       plainTextOnly: false,
     },
     stats: {
-      enrolled: 2,
-      sent: 2,
-      delivered: 2,
-      opened: 2,
-      replied: 2,
-      positiveReplies: 1,
+      enrolled: 0,
+      sent: 0,
+      delivered: 0,
+      opened: 0,
+      replied: 0,
+      positiveReplies: 0,
       bounced: 0,
       unsubscribed: 0,
-      meetingsBooked: 1,
-      totalLeads: 2,
-      sentCount: 2,
-      deliveredCount: 2,
-      openCount: 2,
-      replyCount: 2,
-      interestedCount: 1,
-      meetingCount: 1,
+      meetingsBooked: 0,
+      totalLeads: 0,
+      sentCount: 0,
+      deliveredCount: 0,
+      openCount: 0,
+      replyCount: 0,
+      interestedCount: 0,
+      meetingCount: 0,
       bounceCount: 0,
       unsubscribeCount: 0,
     },
     schedule: {
       startDate: now.split('T')[0],
       sendingDays: [1, 2, 3, 4, 5],
-      startTime: '08:30',
-      endTime: '17:30',
+      startTime: '09:00',
+      endTime: '17:00',
       timezone: 'America/Los_Angeles',
-      minIntervalSeconds: 60,
+      minIntervalSeconds: 90,
       useRecipientTimezone: true,
     },
     steps: [
       {
         id: 'step-1',
-        campaignId: 'camp-q4-enterprise',
+        campaignId: 'camp-template-draft',
         stepNumber: 1,
         type: 'email',
         delayHours: 0,
         emailData: {
           subject: 'Quick question about {{company}} infrastructure',
-          body: 'Hi {{first_name}},\n\nI noticed you oversee engineering initiatives at {{company}}.\n\nWe recently helped several engineering teams cut multi-cloud egress overhead by 34%.\n\nWould you be open to a 10-minute exchange this Thursday?\n\nBest,\nAzeem',
+          body: 'Hi {{first_name}},\n\nI noticed you oversee engineering initiatives at {{company}}.\n\nWe recently helped several engineering teams cut multi-cloud egress overhead by 34%.\n\nWould you be open to a 10-minute exchange this Thursday?\n\nBest,\n{{sender_name}}',
           variants: [
             {
               id: 'var-1',
               subject: 'Quick question about {{company}} infrastructure',
-              body: 'Hi {{first_name}},\n\nI noticed you oversee engineering initiatives at {{company}}.\n\nWe recently helped several engineering teams cut multi-cloud egress overhead by 34%.\n\nWould you be open to a 10-minute exchange this Thursday?\n\nBest,\nAzeem',
+              body: 'Hi {{first_name}},\n\nI noticed you oversee engineering initiatives at {{company}}.\n\nWe recently helped several engineering teams cut multi-cloud egress overhead by 34%.\n\nWould you be open to a 10-minute exchange this Thursday?\n\nBest,\n{{sender_name}}',
               weight: 100,
-              sentCount: 2,
-              replyCount: 2,
+              sentCount: 0,
+              replyCount: 0,
             },
           ],
         },
@@ -403,58 +398,15 @@ function seedInitialDataIfEmpty(db: Database.Database): void {
     now
   );
 
-  // 6. Initial Mailboxes
-  const sampleMailbox: MailboxAccount = {
-    id: 'mb-primary-google',
-    workspaceId: workspace.id,
-    name: 'Azeem Khawer (Workspace)',
-    email: 'azeem@apexoutbound.io',
-    provider: 'gmail',
-    status: 'connected',
-    dailyLimit: 50,
-    dailyQuota: 50,
-    sentToday: 2,
-    warmupStatus: 'active',
-    warmupScore: 98,
-    healthScore: 98,
-    signature: '',
-    lastSyncAt: now,
-    warmupEnabled: true,
-    warmupDailyLimit: 20,
-    warmupSentToday: 4,
-    warmupRampupPerDay: 2,
-    warmupTargetDaily: 35,
-    reputationScore: 98,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  db.prepare(`
-    INSERT INTO email_accounts (id, workspace_id, email, name, provider, status, daily_quota, sent_today, daily_warmup_limit, warmup_sent_today, warmup_enabled, data, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    sampleMailbox.id,
-    sampleMailbox.workspaceId,
-    sampleMailbox.email,
-    sampleMailbox.name,
-    sampleMailbox.provider,
-    sampleMailbox.status,
-    sampleMailbox.dailyQuota,
-    sampleMailbox.sentToday,
-    sampleMailbox.warmupDailyLimit || 20,
-    sampleMailbox.warmupSentToday || 0,
-    sampleMailbox.warmupEnabled ? 1 : 0,
-    JSON.stringify(sampleMailbox),
-    now,
-    now
-  );
+  // 6. Mailbox Accounts: Left empty by default so user links genuine accounts
+  // No fake or dummy email accounts seeded.
 
   // 7. Initial Tasks
   const initialTasks: Task[] = [
     {
       id: 'task-1',
-      title: 'Review inbound reply from Sarah Chen (Datadog)',
-      description: 'Prepare benchmark PDF and calendar link for Tuesday 10am demo.',
+      title: 'Connect your primary email account',
+      description: 'Navigate to Email Accounts to connect your Gmail, Outlook, or SMTP sending account.',
       dueDate: new Date(Date.now() + 86400000).toISOString().split('T')[0],
       priority: 'high',
       status: 'pending',
@@ -712,45 +664,14 @@ export function saveDatabase(data: DatabaseSchema): void {
       }
     }
 
-    // 4. Campaigns
-    if (Array.isArray(data.campaigns)) {
-      const upsertCamp = db.prepare(`
-        INSERT OR REPLACE INTO campaigns (id, workspace_id, list_id, name, status, data, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      for (const c of data.campaigns) {
-        upsertCamp.run(c.id, data.workspace.id, c.listId || null, c.name, c.status, JSON.stringify(c), c.createdAt || now, now);
-      }
-    }
-
-    // 5. Mailboxes
-    if (Array.isArray(data.mailboxes)) {
-      const upsertMb = db.prepare(`
-        INSERT OR REPLACE INTO email_accounts (id, workspace_id, email, name, provider, status, daily_quota, sent_today, daily_warmup_limit, warmup_sent_today, warmup_enabled, data, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      for (const m of data.mailboxes) {
-        upsertMb.run(
-          m.id,
-          data.workspace.id,
-          m.email,
-          m.name,
-          m.provider,
-          m.status,
-          m.dailyQuota,
-          m.sentToday,
-          m.warmupDailyLimit || 20,
-          m.warmupSentToday || 0,
-          m.warmupEnabled ? 1 : 0,
-          JSON.stringify(m),
-          m.createdAt || now,
-          now
-        );
-      }
-    }
-
-    // 6. Sending Jobs
+    // 4. Sending Jobs (sync deletions first to maintain FK integrity with campaigns)
     if (Array.isArray(data.sendingJobs)) {
+      const jobIds = data.sendingJobs.map((j) => j.id);
+      if (jobIds.length > 0) {
+        db.prepare(`DELETE FROM sending_jobs WHERE id NOT IN (${jobIds.map(() => '?').join(',')})`).run(...jobIds);
+      } else {
+        db.prepare('DELETE FROM sending_jobs').run();
+      }
       const upsertJob = db.prepare(`
         INSERT OR REPLACE INTO sending_jobs (id, campaign_id, step_id, lead_id, mailbox_id, scheduled_for, status, attempts, max_attempts, last_attempt_at, last_error, idempotency_key, sent_message_id, data, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -772,6 +693,55 @@ export function saveDatabase(data: DatabaseSchema): void {
           j.sentMessageId || null,
           JSON.stringify(j),
           j.createdAt || now,
+          now
+        );
+      }
+    }
+
+    // 5. Campaigns
+    if (Array.isArray(data.campaigns)) {
+      const campIds = data.campaigns.map((c) => c.id);
+      if (campIds.length > 0) {
+        db.prepare(`DELETE FROM campaigns WHERE id NOT IN (${campIds.map(() => '?').join(',')})`).run(...campIds);
+      } else {
+        db.prepare('DELETE FROM campaigns').run();
+      }
+      const upsertCamp = db.prepare(`
+        INSERT OR REPLACE INTO campaigns (id, workspace_id, list_id, name, status, data, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const c of data.campaigns) {
+        upsertCamp.run(c.id, data.workspace.id, c.listId || null, c.name, c.status, JSON.stringify(c), c.createdAt || now, now);
+      }
+    }
+
+    // 6. Mailboxes
+    if (Array.isArray(data.mailboxes)) {
+      const mbIds = data.mailboxes.map((m) => m.id);
+      if (mbIds.length > 0) {
+        db.prepare(`DELETE FROM email_accounts WHERE id NOT IN (${mbIds.map(() => '?').join(',')})`).run(...mbIds);
+      } else {
+        db.prepare('DELETE FROM email_accounts').run();
+      }
+      const upsertMb = db.prepare(`
+        INSERT OR REPLACE INTO email_accounts (id, workspace_id, email, name, provider, status, daily_quota, sent_today, daily_warmup_limit, warmup_sent_today, warmup_enabled, data, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const m of data.mailboxes) {
+        upsertMb.run(
+          m.id,
+          data.workspace.id,
+          m.email,
+          m.name,
+          m.provider,
+          m.status,
+          m.dailyQuota,
+          m.sentToday,
+          m.warmupDailyLimit || 20,
+          m.warmupSentToday || 0,
+          m.warmupEnabled ? 1 : 0,
+          JSON.stringify(m),
+          m.createdAt || now,
           now
         );
       }

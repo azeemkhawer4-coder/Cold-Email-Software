@@ -217,17 +217,34 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
                       <span className="text-[11px] text-slate-400 font-mono truncate block">{mb.email}</span>
                     </div>
                   </div>
-                  <span
-                    className={`rounded px-2 py-0.5 text-[9px] font-mono font-semibold uppercase tracking-wider ${
-                      mb.status === 'connected'
-                        ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                        : mb.status === 'error'
-                        ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
-                        : 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                    }`}
-                  >
-                    {mb.status}
-                  </span>
+                  {(() => {
+                    const getBadge = (status: string) => {
+                      switch (status) {
+                        case 'connected':
+                          return { text: 'CONNECTED', cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' };
+                        case 'sync_completed':
+                          return { text: 'SYNC COMPLETED', cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' };
+                        case 'synchronizing':
+                          return { text: 'SYNCHRONIZING', cls: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30 animate-pulse' };
+                        case 'reauth_required':
+                          return { text: 'RE-AUTH REQUIRED', cls: 'bg-rose-500/20 text-rose-300 border-rose-500/50 font-bold' };
+                        case 'temporary_error':
+                          return { text: 'TEMP ERROR', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/30' };
+                        case 'disconnected':
+                          return { text: 'DISCONNECTED', cls: 'bg-slate-700/30 text-slate-400 border-slate-700/50' };
+                        case 'paused':
+                          return { text: 'PAUSED', cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' };
+                        default:
+                          return { text: (status || 'ERROR').toUpperCase(), cls: 'bg-rose-500/15 text-rose-400 border-rose-500/30' };
+                      }
+                    };
+                    const badge = getBadge(mb.status);
+                    return (
+                      <span className={`rounded px-2 py-0.5 text-[9px] font-mono font-semibold uppercase tracking-wider border ${badge.cls}`}>
+                        {badge.text}
+                      </span>
+                    );
+                  })()}
                 </div>
 
                 {/* Provider Protocol Badge */}
@@ -283,8 +300,32 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
                   </div>
                 </div>
 
+                {/* Re-auth Required Banner */}
+                {mb.status === 'reauth_required' && (
+                  <div className="mt-2.5 p-2.5 rounded-lg text-xs bg-rose-950/50 text-rose-200 border border-rose-700/60 space-y-2">
+                    <div className="flex items-start gap-1.5">
+                      <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-rose-400" />
+                      <div>
+                        <p className="font-semibold text-rose-300">Re-authentication Required</p>
+                        <p className="text-[11px] text-rose-200/80 leading-snug">
+                          OAuth access token expired or refresh token was revoked. Re-authenticate with Google to resume sending.
+                        </p>
+                      </div>
+                    </div>
+                    {mb.provider === 'gmail' && (
+                      <a
+                        href="/api/auth/google"
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-semibold transition shadow-xs"
+                      >
+                        <Key className="h-3 w-3" />
+                        <span>Reconnect Google Account</span>
+                      </a>
+                    )}
+                  </div>
+                )}
+
                 {/* Provider Error Message */}
-                {mb.lastError && (
+                {mb.lastError && mb.status !== 'reauth_required' && (
                   <div className="mt-2.5 p-2 rounded-lg text-[10.5px] font-mono leading-tight bg-rose-950/40 text-rose-300 border border-rose-800/60 flex items-start gap-1.5">
                     <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5 text-rose-400" />
                     <span className="break-all">{mb.lastError}</span>
@@ -615,15 +656,57 @@ const ConnectAccountModal: React.FC<{ onClose: () => void; onConnected: () => vo
             </div>
           )}
 
-          {(provider === 'gmail' || provider === 'outlook') && (
+          {provider === 'gmail' && (
+            <div className="space-y-3">
+              <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-white">Google Workspace Direct OAuth 2.0</span>
+                  <span className="rounded bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 text-[9px] font-mono text-emerald-400">
+                    RECOMMENDED
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 leading-snug">
+                  Authorize OutboundOS with your Google account in 1 click. Generates offline refresh tokens saved in local SQLite.
+                </p>
+                <a
+                  href="/api/auth/google"
+                  className="flex items-center justify-center gap-2 w-full py-2 px-3 rounded-lg bg-white hover:bg-slate-100 text-slate-900 font-semibold text-xs transition shadow-xs cursor-pointer"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
+                  </svg>
+                  <span>Authorize with Google OAuth</span>
+                </a>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+                <label className="block text-slate-300 font-medium mb-1 flex items-center gap-1.5">
+                  <Key className="h-3.5 w-3.5 text-blue-400" />
+                  Or Enter Access / Refresh Token Manually
+                </label>
+                <textarea
+                  rows={2}
+                  placeholder="ya29.a0AfH6SMC... (Optional if using 1-click button above)"
+                  value={oauthToken}
+                  onChange={(e) => setOauthToken(e.target.value)}
+                  className="w-full rounded-lg bg-slate-900 border border-slate-800 p-2 text-slate-100 font-mono text-[10.5px]"
+                />
+              </div>
+            </div>
+          )}
+
+          {provider === 'outlook' && (
             <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
               <label className="block text-slate-300 font-medium mb-1 flex items-center gap-1.5">
                 <Key className="h-3.5 w-3.5 text-blue-400" />
-                OAuth 2.0 Access Token
+                Microsoft Graph OAuth 2.0 Access Token
               </label>
               <textarea
                 rows={2}
-                placeholder="ya29.a0AfH6SMC... or eyJ0eXAiOiJKV1QiLC..."
+                placeholder="eyJ0eXAiOiJKV1QiLC..."
                 value={oauthToken}
                 onChange={(e) => setOauthToken(e.target.value)}
                 className="w-full rounded-lg bg-slate-900 border border-slate-800 p-2 text-slate-100 font-mono text-[10.5px]"

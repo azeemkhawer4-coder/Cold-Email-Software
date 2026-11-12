@@ -30,6 +30,9 @@ import {
 import confetti from 'canvas-confetti';
 import { Campaign, CampaignStep, LeadList, MailboxAccount, Lead, EmailVariant } from '../types';
 import { interpolateTemplate } from '../utils/templateEngine';
+import { SendNowModal } from '../components/campaigns/SendNowModal';
+import { ScheduleCampaignModal } from '../components/campaigns/ScheduleCampaignModal';
+import { SafetyControlBar } from '../components/campaigns/SafetyControlBar';
 
 interface CampaignsPageProps {
   campaigns: Campaign[];
@@ -53,6 +56,8 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
   const [isBuilderOpen, setIsBuilderOpen] = useState(openCreateWizard);
   const [campaignToDelete, setCampaignToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [sendNowCampaign, setSendNowCampaign] = useState<Campaign | null>(null);
+  const [scheduleCampaign, setScheduleCampaign] = useState<Campaign | null>(null);
   const [launchFeedback, setLaunchFeedback] = useState<{
     id: string;
     reason: string;
@@ -149,18 +154,8 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
         </button>
       </div>
 
-      {/* Autonomous Background Worker Status */}
-      <div className="rounded-xl bg-slate-900/60 border border-slate-800 px-4 py-2.5 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs">
-        <div className="flex items-center gap-2.5 text-slate-300">
-          <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
-          <span>
-            <strong className="text-white">Autonomous Background Worker Active:</strong> Campaigns execute on schedule whenever OutboundOS is running locally, even when this browser tab is closed.
-          </span>
-        </div>
-        <span className="text-[11px] font-mono text-emerald-400 font-semibold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 shrink-0">
-          $0.00 Relay Fees (Direct Provider Dispatch)
-        </span>
-      </div>
+      {/* Safety & Worker Control Bar */}
+      <SafetyControlBar onRefresh={onRefreshCampaigns} />
 
       {/* Launch Feedback & Schedule Notice Banner */}
       {launchFeedback && (
@@ -246,12 +241,30 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
                       className={`inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wider ${
                         camp.status === 'active'
                           ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                          : camp.status === 'scheduled'
+                          ? 'bg-blue-500/15 text-blue-400 border border-blue-500/30'
                           : camp.status === 'paused'
                           ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                          : camp.status === 'completed'
+                          ? 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30'
+                          : camp.status === 'cancelled'
+                          ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                          : camp.status === 'failed'
+                          ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
                           : 'bg-slate-800 text-slate-400 border border-slate-700'
                       }`}
                     >
-                      <span className={`h-1.5 w-1.5 rounded-full ${camp.status === 'active' ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          camp.status === 'active'
+                            ? 'bg-emerald-400 animate-pulse'
+                            : camp.status === 'scheduled'
+                            ? 'bg-blue-400'
+                            : camp.status === 'paused'
+                            ? 'bg-amber-400'
+                            : 'bg-slate-500'
+                        }`}
+                      />
                       {camp.status || 'draft'}
                     </span>
                   </td>
@@ -289,20 +302,31 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
                       {camp.status === 'active' ? (
                         <button
                           onClick={() => handlePauseCampaign(camp.id)}
-                          className="p-1.5 rounded-lg text-amber-400 hover:bg-slate-800 transition cursor-pointer"
-                          title="Pause sending"
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/30 hover:bg-amber-500/25 transition font-medium cursor-pointer"
+                          title="Pause campaign sending"
                         >
-                          <Pause className="h-4 w-4" />
+                          <Pause className="h-3 w-3" />
+                          <span>Pause</span>
                         </button>
                       ) : (
-                        <button
-                          onClick={() => handleLaunchCampaign(camp.id)}
-                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30 transition font-medium cursor-pointer"
-                          title="Launch live campaign"
-                        >
-                          <Play className="h-3 w-3 fill-emerald-400" />
-                          <span>Launch</span>
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => setSendNowCampaign(camp)}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30 transition font-semibold cursor-pointer shadow-xs"
+                            title="Send Campaign Now (reviews parameters and initiates immediate send)"
+                          >
+                            <Send className="h-3 w-3" />
+                            <span>Send Now</span>
+                          </button>
+                          <button
+                            onClick={() => setScheduleCampaign(camp)}
+                            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-800 transition font-medium cursor-pointer"
+                            title="Schedule for future automated dispatch"
+                          >
+                            <Calendar className="h-3 w-3 text-blue-400" />
+                            <span>Schedule</span>
+                          </button>
+                        </div>
                       )}
                       <button
                         onClick={() => {
@@ -340,6 +364,50 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
           onClose={handleCloseWizard}
           onSaved={() => {
             handleCloseWizard();
+            onRefreshCampaigns();
+          }}
+          onRequestSendNow={(c) => {
+            handleCloseWizard();
+            setSendNowCampaign(c);
+          }}
+          onRequestSchedule={(c) => {
+            handleCloseWizard();
+            setScheduleCampaign(c);
+          }}
+        />
+      )}
+
+      {/* SEND NOW CONFIRMATION MODAL */}
+      {sendNowCampaign && (
+        <SendNowModal
+          campaign={sendNowCampaign}
+          onClose={() => setSendNowCampaign(null)}
+          onConfirmed={(count, msg) => {
+            setSendNowCampaign(null);
+            setLaunchFeedback({
+              id: sendNowCampaign.id,
+              reason: msg,
+              inScheduleWindow: true,
+              batchResult: { processedCount: count, failedCount: 0, errors: [] },
+            });
+            onRefreshCampaigns();
+          }}
+        />
+      )}
+
+      {/* SCHEDULE CAMPAIGN MODAL */}
+      {scheduleCampaign && (
+        <ScheduleCampaignModal
+          campaign={scheduleCampaign}
+          mailboxes={mailboxes}
+          onClose={() => setScheduleCampaign(null)}
+          onScheduled={(c, msg) => {
+            setScheduleCampaign(null);
+            setLaunchFeedback({
+              id: c.id,
+              reason: msg,
+              inScheduleWindow: false,
+            });
             onRefreshCampaigns();
           }}
         />
@@ -386,6 +454,8 @@ interface WizardProps {
   leads: Lead[];
   onClose: () => void;
   onSaved: () => void;
+  onRequestSendNow?: (campaign: Campaign) => void;
+  onRequestSchedule?: (campaign: Campaign) => void;
 }
 
 const CampaignBuilderWizard: React.FC<WizardProps> = ({
@@ -395,6 +465,8 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
   leads,
   onClose,
   onSaved,
+  onRequestSendNow,
+  onRequestSchedule,
 }) => {
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1);
 
@@ -684,7 +756,7 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
     setSteps(nextSteps);
   };
 
-  const handleSaveCampaign = async (launchImmediately = false) => {
+  const handleSaveCampaign = async (action: 'draft' | 'send_now' | 'schedule' = 'draft') => {
     const payload = {
       name,
       description,
@@ -715,13 +787,15 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
     };
 
     try {
-      let savedCampId = campaign?.id;
+      let savedCamp: Campaign | null = null;
       if (campaign?.id) {
-        await fetch(`/api/campaigns/${campaign.id}`, {
+        const res = await fetch(`/api/campaigns/${campaign.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
+        const data = await res.json();
+        savedCamp = data.campaign || { ...campaign, ...payload };
       } else {
         const res = await fetch('/api/campaigns', {
           method: 'POST',
@@ -729,15 +803,16 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
           body: JSON.stringify(payload),
         });
         const data = await res.json();
-        savedCampId = data.campaign.id;
+        savedCamp = data.campaign;
       }
 
-      if (launchImmediately && savedCampId) {
-        await fetch(`/api/campaigns/${savedCampId}/launch`, { method: 'POST' });
-        confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } });
+      if (action === 'send_now' && savedCamp && onRequestSendNow) {
+        onRequestSendNow(savedCamp);
+      } else if (action === 'schedule' && savedCamp && onRequestSchedule) {
+        onRequestSchedule(savedCamp);
+      } else {
+        onSaved();
       }
-
-      onSaved();
     } catch (err) {
       console.error(err);
     }
@@ -1551,7 +1626,7 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => handleSaveCampaign(false)}
+              onClick={() => handleSaveCampaign('draft')}
               className="rounded-lg bg-slate-900 border border-slate-800 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 cursor-pointer"
             >
               Save Sequence as Draft
@@ -1567,14 +1642,24 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
                 <ChevronRight className="h-4 w-4" />
               </button>
             ) : (
-              <button
-                type="button"
-                onClick={() => handleSaveCampaign(true)}
-                className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white hover:bg-emerald-500 shadow-md shadow-emerald-600/30 cursor-pointer"
-              >
-                <Play className="h-3.5 w-3.5 fill-white" />
-                <span>Launch Campaign Now</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleSaveCampaign('schedule')}
+                  className="flex items-center gap-1.5 rounded-lg bg-slate-900 border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 shadow-xs cursor-pointer"
+                >
+                  <Calendar className="h-3.5 w-3.5 text-blue-400" />
+                  <span>Schedule Campaign</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSaveCampaign('send_now')}
+                  className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white hover:bg-emerald-500 shadow-md shadow-emerald-600/30 cursor-pointer"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  <span>Send Campaign Now</span>
+                </button>
+              </div>
             )}
           </div>
         </div>

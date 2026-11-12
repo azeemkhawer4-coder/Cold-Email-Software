@@ -157,9 +157,12 @@ test('End-to-End Workflow with Controlled Test Mailbox', async (t) => {
     assert.equal(report?.errorType, 'smtp_connect');
     console.log('Failure successfully reported as expected:', result.error);
 
-    // Clean up ephemeral broken mailbox from database
+    // Clean up all ephemeral test artifacts from database
     const freshDb = getDatabase();
-    freshDb.mailboxes = freshDb.mailboxes.filter((m) => m.id !== brokenMailbox.id);
+    freshDb.mailboxes = freshDb.mailboxes.filter((m) => m.id !== brokenMailbox.id && m.id !== testMailbox?.id);
+    freshDb.sendingJobs = freshDb.sendingJobs.filter((j) => !j.campaignId?.startsWith('camp-test-') && j.campaignId !== 'camp-fail-test');
+    freshDb.failureReports = freshDb.failureReports.filter((f) => !f.campaignId?.startsWith('camp-test-') && f.campaignId !== 'camp-fail-test');
+    freshDb.sendingEvents = freshDb.sendingEvents.filter((e) => !e.campaignId?.startsWith('camp-test-') && e.campaignId !== 'camp-fail-test');
     saveDatabase(freshDb);
   });
 });

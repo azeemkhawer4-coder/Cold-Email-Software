@@ -299,10 +299,36 @@ export function enrollCampaignLeadsIntoQueue(campaign: Campaign, now = new Date(
 }
 
 /**
- * Enrolls all active campaigns into the durable queue
+ * Enrolls all active campaigns into the durable queue.
+ * Also checks scheduled campaigns and activates them when their scheduledStartAt arrives.
  */
 export function enrollAllActiveCampaigns(): number {
   const db = getDatabase();
+  const now = new Date();
+
+  // Check for scheduled campaigns whose start time has arrived
+  let hasStatusChange = false;
+  for (const campaign of db.campaigns) {
+    if (campaign.status === 'scheduled') {
+      const scheduledTime = campaign.scheduledStartAt
+        ? new Date(campaign.scheduledStartAt)
+        : campaign.schedule?.startDate
+        ? new Date(campaign.schedule.startDate)
+        : null;
+
+      if (scheduledTime && scheduledTime <= now) {
+        console.log(`[Scheduler] Campaign "${campaign.name}" (${campaign.id}) reached scheduled start time. Activating.`);
+        campaign.status = 'active';
+        campaign.launchedAt = now.toISOString();
+        hasStatusChange = true;
+      }
+    }
+  }
+
+  if (hasStatusChange) {
+    saveDatabase(db);
+  }
+
   const activeCampaigns = db.campaigns.filter((c) => c.status === 'active');
   let totalEnqueued = 0;
 

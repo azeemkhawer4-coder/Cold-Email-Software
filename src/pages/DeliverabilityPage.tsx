@@ -19,16 +19,45 @@ import {
   RotateCw,
 } from 'lucide-react';
 import { SendingJob, FailureReport, QueueStats } from '../types';
+import { SafetyControlBar } from '../components/campaigns/SafetyControlBar';
 
 export const DeliverabilityPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dns' | 'queue' | 'failures'>('queue');
-  const [testDomain, setTestDomain] = useState('apexoutbound.io');
+  const [dnsDomain, setDnsDomain] = useState('');
+  const [dnsResult, setDnsResult] = useState<any>(null);
+  const [isCheckingDns, setIsCheckingDns] = useState(false);
+  const [dnsError, setDnsError] = useState<string | null>(null);
+
   const [subjectText, setSubjectText] = useState('Quick question regarding your cloud infrastructure');
   const [bodyText, setBodyText] = useState(
-    'Hi {{first_name}},\n\nI noticed your team at {{company}} is expanding platform engineering.\n\nWe recently helped several peers cut their cloud egress overhead by 34%.\n\nWould you be open to a 10-minute chat this Thursday?\n\nBest,\nAzeem'
+    'Hi {{first_name}},\n\nI noticed your team at {{company}} is expanding platform engineering.\n\nWe recently helped several peers cut their cloud egress overhead by 34%.\n\nWould you be open to a 10-minute chat this Thursday?\n\nBest,\n{{sender_name}}'
   );
   const [scanResult, setScanResult] = useState<any>(null);
   const [isScanning, setIsScanning] = useState(false);
+
+  const handleCheckDns = async (customDomain?: string) => {
+    const target = (customDomain || dnsDomain || '').trim();
+    if (!target) {
+      setDnsError('Please enter a domain name (e.g. yourcompany.com)');
+      return;
+    }
+    setIsCheckingDns(true);
+    setDnsError(null);
+    try {
+      const res = await fetch('/api/deliverability/dns-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain: target }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'DNS check failed');
+      setDnsResult(data);
+    } catch (err: any) {
+      setDnsError(err.message);
+    } finally {
+      setIsCheckingDns(false);
+    }
+  };
 
   // Durable Queue & Failures State
   const [queueJobs, setQueueJobs] = useState<SendingJob[]>([]);
@@ -107,9 +136,15 @@ export const DeliverabilityPage: React.FC = () => {
         <div>
           <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
             Deliverability, Queue & Failures
-            <span className="rounded bg-slate-900 border border-slate-800 px-2 py-0.5 text-xs font-mono font-medium text-emerald-400 tabular-nums">
-              Score: 98/100
-            </span>
+            {dnsResult ? (
+              <span className="rounded bg-slate-900 border border-slate-800 px-2.5 py-0.5 text-xs font-mono font-medium text-emerald-400 tabular-nums">
+                Score: {dnsResult.score}/100 ({dnsResult.domain})
+              </span>
+            ) : (
+              <span className="rounded bg-slate-900 border border-slate-800 px-2.5 py-0.5 text-xs font-mono text-slate-400">
+                Deliverability: Not checked
+              </span>
+            )}
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
             Durable outbox queue management, failure reporting with exponential backoff, and SPF/DKIM verification.
@@ -163,6 +198,9 @@ export const DeliverabilityPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Safety & Worker Control Bar */}
+      <SafetyControlBar onRefresh={fetchQueueAndFailures} />
 
       {/* TAB 1: OUTBOX QUEUE */}
       {activeTab === 'queue' && (
@@ -368,72 +406,171 @@ export const DeliverabilityPage: React.FC = () => {
       {/* TAB 3: DNS & CONTENT SPAM AUDITOR */}
       {activeTab === 'dns' && (
         <div className="space-y-6">
-          {/* DNS Records Status Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* SPF */}
-            <div className="surface-card rounded-xl p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-300">SPF Record</span>
-                <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Valid
-                </span>
+          {/* Live DNS Checker Search Bar */}
+          <div className="surface-card rounded-xl p-5 border border-slate-800 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-white flex items-center gap-2">
+                  <ShieldCheck className="h-4 w-4 text-emerald-400" />
+                  Live Outreach Domain DNS Auditor
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Direct $0 local DNS resolution for SPF, DKIM, DMARC, and MX records via Node.js dns resolver.
+                </p>
               </div>
-              <div className="rounded bg-slate-950 p-2 font-mono text-[10px] text-slate-300 border border-slate-800 break-all">
-                v=spf1 include:_spf.google.com include:mailgun.org ~all
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="e.g. yourcompany.com"
+                  value={dnsDomain}
+                  onChange={(e) => setDnsDomain(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCheckDns()}
+                  className="rounded-lg bg-slate-900 border border-slate-700/80 px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 min-w-[220px]"
+                />
+                <button
+                  onClick={() => handleCheckDns()}
+                  disabled={isCheckingDns}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium transition-colors shadow-sm cursor-pointer"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${isCheckingDns ? 'animate-spin' : ''}`} />
+                  {isCheckingDns ? 'Querying DNS...' : 'Verify DNS'}
+                </button>
               </div>
-              <p className="text-[11px] text-slate-400 leading-tight">
-                Authorizes Google Workspace and fallback relay IP addresses for your domain.
-              </p>
             </div>
 
-            {/* DKIM */}
-            <div className="surface-card rounded-xl p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-300">DKIM 2048-bit</span>
-                <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Aligned
-                </span>
+            {dnsError && (
+              <div className="rounded-lg bg-rose-500/10 border border-rose-500/30 p-3 text-xs text-rose-300 flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-rose-400 shrink-0" />
+                <span>{dnsError}</span>
               </div>
-              <div className="rounded bg-slate-950 p-2 font-mono text-[10px] text-slate-300 border border-slate-800 break-all">
-                google._domainkey.apexoutbound.io
-              </div>
-              <p className="text-[11px] text-slate-400 leading-tight">
-                Cryptographic public key verified, preventing unauthorized header tampering.
-              </p>
-            </div>
-
-            {/* DMARC */}
-            <div className="surface-card rounded-xl p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-300">DMARC Policy</span>
-                <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Enforced
-                </span>
-              </div>
-              <div className="rounded bg-slate-950 p-2 font-mono text-[10px] text-slate-300 border border-slate-800 break-all">
-                v=DMARC1; p=quarantine; rua=mailto:dmarc@apexoutbound.io; pct=100
-              </div>
-              <p className="text-[11px] text-slate-400 leading-tight">
-                Instructs receiving mailbox providers to quarantine unauthorized spoofed messages.
-              </p>
-            </div>
-
-            {/* MX */}
-            <div className="surface-card rounded-xl p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-300">MX Routing</span>
-                <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
-                  <CheckCircle2 className="h-3.5 w-3.5" /> Verified
-                </span>
-              </div>
-              <div className="rounded bg-slate-950 p-2 font-mono text-[10px] text-slate-300 border border-slate-800 break-all">
-                10 aspmx.l.google.com
-              </div>
-              <p className="text-[11px] text-slate-400 leading-tight">
-                Inbound mail routes properly configured for real-time reply synchronization.
-              </p>
-            </div>
+            )}
           </div>
+
+          {/* DNS Records Status Grid */}
+          {!dnsResult ? (
+            <div className="surface-card rounded-xl p-8 border border-slate-800 text-center space-y-3">
+              <div className="h-12 w-12 rounded-full bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto text-slate-400">
+                <Server className="h-6 w-6" />
+              </div>
+              <div>
+                <h4 className="text-sm font-semibold text-slate-200">DNS Records Not Verified Yet</h4>
+                <p className="text-xs text-slate-400 max-w-md mx-auto mt-1">
+                  Enter your sending domain (e.g. your outreach domain or Google Workspace root domain) above and click &quot;Verify DNS&quot; to test your live configuration.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between text-xs text-slate-400 px-1">
+                <span>Domain: <strong className="text-slate-200 font-mono">{dnsResult.domain}</strong></span>
+                <span className="flex items-center gap-2">
+                  <span>Score:</span>
+                  <span className={`font-mono font-bold px-2 py-0.5 rounded text-xs ${
+                    dnsResult.score >= 80 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                    dnsResult.score >= 50 ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                    'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                  }`}>
+                    {dnsResult.score}/100
+                  </span>
+                  <span className="text-[10px] text-slate-500">
+                    Checked {new Date(dnsResult.checkedAt).toLocaleTimeString()}
+                  </span>
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {/* SPF */}
+                <div className="surface-card rounded-xl p-4 space-y-2 border border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-300">SPF Record</span>
+                    <span className={`flex items-center gap-1 text-[11px] font-medium ${
+                      dnsResult.spf?.valid ? 'text-emerald-400' : 'text-rose-400'
+                    }`}>
+                      {dnsResult.spf?.valid ? (
+                        <><CheckCircle2 className="h-3.5 w-3.5" /> Valid</>
+                      ) : (
+                        <><XCircle className="h-3.5 w-3.5" /> Missing</>
+                      )}
+                    </span>
+                  </div>
+                  <div className="rounded bg-slate-950 p-2 font-mono text-[10px] text-slate-300 border border-slate-800 break-all max-h-24 overflow-y-auto">
+                    {dnsResult.spf?.record || 'No SPF TXT record found'}
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-tight">
+                    {dnsResult.spf?.message || 'Authorizes sending mail servers for this domain.'}
+                  </p>
+                </div>
+
+                {/* DKIM */}
+                <div className="surface-card rounded-xl p-4 space-y-2 border border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-300">DKIM Record</span>
+                    <span className={`flex items-center gap-1 text-[11px] font-medium ${
+                      dnsResult.dkim?.valid ? 'text-emerald-400' : 'text-amber-400'
+                    }`}>
+                      {dnsResult.dkim?.valid ? (
+                        <><CheckCircle2 className="h-3.5 w-3.5" /> Aligned</>
+                      ) : (
+                        <><AlertTriangle className="h-3.5 w-3.5" /> {dnsResult.dkim?.selector ? 'Not Found' : 'Selector Needed'}</>
+                      )}
+                    </span>
+                  </div>
+                  <div className="rounded bg-slate-950 p-2 font-mono text-[10px] text-slate-300 border border-slate-800 break-all max-h-24 overflow-y-auto">
+                    {dnsResult.dkim?.record || 'No public DKIM key detected on default selectors'}
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-tight">
+                    {dnsResult.dkim?.message || 'Cryptographic email signing verification.'}
+                  </p>
+                </div>
+
+                {/* DMARC */}
+                <div className="surface-card rounded-xl p-4 space-y-2 border border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-300">DMARC Policy</span>
+                    <span className={`flex items-center gap-1 text-[11px] font-medium ${
+                      dnsResult.dmarc?.valid ? 'text-emerald-400' : 'text-rose-400'
+                    }`}>
+                      {dnsResult.dmarc?.valid ? (
+                        <><CheckCircle2 className="h-3.5 w-3.5" /> {dnsResult.dmarc?.policy || 'Configured'}</>
+                      ) : (
+                        <><XCircle className="h-3.5 w-3.5" /> Missing</>
+                      )}
+                    </span>
+                  </div>
+                  <div className="rounded bg-slate-950 p-2 font-mono text-[10px] text-slate-300 border border-slate-800 break-all max-h-24 overflow-y-auto">
+                    {dnsResult.dmarc?.record || 'No _dmarc TXT record found'}
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-tight">
+                    {dnsResult.dmarc?.message || 'Directs receiving servers how to handle unauthenticated mail.'}
+                  </p>
+                </div>
+
+                {/* MX */}
+                <div className="surface-card rounded-xl p-4 space-y-2 border border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-300">MX Routing</span>
+                    <span className={`flex items-center gap-1 text-[11px] font-medium ${
+                      dnsResult.mx?.valid ? 'text-emerald-400' : 'text-rose-400'
+                    }`}>
+                      {dnsResult.mx?.valid ? (
+                        <><CheckCircle2 className="h-3.5 w-3.5" /> Verified</>
+                      ) : (
+                        <><XCircle className="h-3.5 w-3.5" /> Missing</>
+                      )}
+                    </span>
+                  </div>
+                  <div className="rounded bg-slate-950 p-2 font-mono text-[10px] text-slate-300 border border-slate-800 break-all max-h-24 overflow-y-auto">
+                    {dnsResult.mx?.records && dnsResult.mx.records.length > 0
+                      ? dnsResult.mx.records.map((r: any) => `${r.priority} ${r.exchange}`).join(', ')
+                      : 'No MX records found'}
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-tight">
+                    {dnsResult.mx?.message || 'Mail exchange routes required for reply synchronization.'}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Spam Filter Audit Tool */}
           <div className="surface-card rounded-xl p-6">

@@ -101,6 +101,11 @@ export async function processOutboundSendingBatch(): Promise<{
   failedCount: number;
   errors: string[];
 }> {
+  // If worker sending is paused or inactive, skip dispatching entirely
+  if (!workerSendingActive) {
+    return { processedCount: 0, failedCount: 0, errors: [] };
+  }
+
   // Step 1: Enroll active campaign steps based on schedules & delay rules
   enrollAllActiveCampaigns();
 
@@ -417,6 +422,87 @@ export async function syncAllMailboxReplies(): Promise<{ syncedCount: number; er
 }
 
 /**
+ * Worker sending state controls
+ * Default: false unless AUTO_START_WORKER=true is set in environment.
+ * Prevents unintentional automatic sending on fresh boot.
+ */
+let workerSendingActive = process.env.AUTO_START_WORKER === 'true';
+
+export function isWorkerSendingActive(): boolean {
+  return workerSendingActive;
+}
+
+export function setWorkerSendingActive(active: boolean): void {
+  workerSendingActive = active;
+  console.log(`[OutboundOS Worker] Worker sending dispatch updated: active = ${active}`);
+}
+
+/**
+ * Global Emergency Kill Switch
+ * 1. Disables worker sending
+ * 2. Pauses all active & scheduled campaigns
+ * 3. Cancels all pending queued/retrying sending jobs
+ */
+export function activateKillSwitch(): { pausedCampaigns: number; cancelledJobs: number } {
+  workerSendingActive = false;
+  const db = getDatabase();
+
+  let pausedCampaigns = 0;
+  for (const c of db.campaigns) {
+    if (c.status === 'active' || c.status === 'scheduled') {
+      c.status = 'paused';
+      pausedCampaigns++;
+    }
+  }
+
+  let cancelledJobs = 0;
+  for (const j of db.sendingJobs) {
+    if (j.status === 'queued' || j.status === 'retrying' || j.status === 'scheduled' || j.status === 'processing') {
+      j.status = 'cancelled';
+      j.lastError = 'Cancelled via Global Sending Kill Switch';
+      cancelledJobs++;
+    }
+  }
+
+  saveDatabase(db);
+  console.log(`[KillSwitch] Emergency stop activated: ${pausedCampaigns} campaigns paused, ${cancelledJobs} jobs cancelled.`);
+  return { pausedCampaigns, cancelledJobs };
+}
+
+/**
+ * Pauses all active campaigns without cancelling queued jobs
+ */
+export function pauseAllCampaigns(): number {
+  const db = getDatabase();
+  let pausedCount = 0;
+  for (const c of db.campaigns) {
+    if (c.status === 'active' || c.status === 'scheduled') {
+      c.status = 'paused';
+      pausedCount++;
+    }
+  }
+  saveDatabase(db);
+  return pausedCount;
+}
+
+/**
+ * Clears or cancels all pending jobs in the queue
+ */
+export function clearPendingQueue(): number {
+  const db = getDatabase();
+  let clearedCount = 0;
+  for (const j of db.sendingJobs) {
+    if (j.status === 'queued' || j.status === 'retrying' || j.status === 'scheduled') {
+      j.status = 'cancelled';
+      j.lastError = 'Cleared by operator from queue management';
+      clearedCount++;
+    }
+  }
+  saveDatabase(db);
+  return clearedCount;
+}
+
+/**
  * Background persistent worker timer running inside Node.js
  * Ensures campaigns execute and reply sync runs when the browser is closed.
  */
@@ -427,11 +513,11 @@ let isWorkerTicking = false;
 export function startAutonomousBackgroundWorker(): void {
   if (workerInterval) return;
 
-  console.log('[OutboundOS Worker] Starting persistent autonomous background engine...');
+  console.log(`[OutboundOS Worker] Starting persistent background engine (sendingActive: ${workerSendingActive})...`);
 
   // Queue dispatch loop: every 15 seconds
   workerInterval = setInterval(async () => {
-    if (isWorkerTicking) return;
+    if (isWorkerTicking || !workerSendingActive) return;
     isWorkerTicking = true;
     try {
       await processOutboundSendingBatch();
@@ -442,7 +528,7 @@ export function startAutonomousBackgroundWorker(): void {
     }
   }, 15000);
 
-  // Reply sync loop: every 60 seconds
+  // Reply sync loop: every 60 seconds (always runs to safely detect inbound replies)
   replySyncInterval = setInterval(async () => {
     try {
       await syncAllMailboxReplies();

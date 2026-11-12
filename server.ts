@@ -26,7 +26,13 @@ import {
   handleUnsubscribe,
   dispatchRealEmail,
   startAutonomousBackgroundWorker,
+  isWorkerSendingActive,
+  setWorkerSendingActive,
+  activateKillSwitch,
+  pauseAllCampaigns,
+  clearPendingQueue,
 } from './src/server/worker';
+import { ensureValidGmailToken } from './src/server/adapters/gmailAdapter';
 import { getQueueStats } from './src/server/queue';
 import {
   provisionControlledTestMailbox,
@@ -860,6 +866,161 @@ app.post('/api/campaigns/:id/pause', (req: Request, res: Response) => {
   res.json({ success: true, campaign: camp });
 });
 
+/**
+ * Pre-launch diagnostic and confirmation summary for modal display
+ */
+app.get('/api/campaigns/:id/prelaunch-summary', (req: Request, res: Response) => {
+  const db = getDatabase();
+  const camp = db.campaigns.find((c) => c.id === req.params.id);
+  if (!camp) return res.status(404).json({ error: 'Campaign not found' });
+
+  const leadsInList = db.leads.filter((l) => l.listId === camp.leadListId || l.campaignId === camp.id);
+  const totalLeads = leadsInList.length;
+
+  const suppressedEmails = new Set(db.suppressionList.map((s) => s.email.toLowerCase()));
+  let unsubscribedCount = 0;
+  let bouncedCount = 0;
+  let repliedCount = 0;
+  let eligibleCount = 0;
+
+  for (const lead of leadsInList) {
+    if (lead.unsubscribeStatus || suppressedEmails.has(lead.email.toLowerCase())) {
+      unsubscribedCount++;
+    } else if (lead.bounceStatus) {
+      bouncedCount++;
+    } else if (lead.status === 'replied' || lead.status === 'interested' || lead.status === 'meeting_booked') {
+      repliedCount++;
+    } else {
+      eligibleCount++;
+    }
+  }
+
+  const assignedMailboxes = db.mailboxes.filter((m) => camp.mailboxAccountIds?.includes(m.id));
+  const connectedMailboxes = assignedMailboxes.filter((m) => m.status === 'connected');
+
+  const firstStep = camp.steps?.find((s) => s.type === 'email');
+  const firstStepSubject = firstStep?.emailData?.subject || '(No subject specified)';
+
+  const minInterval = camp.schedule?.minIntervalSeconds || 60;
+  const totalEstimatedSeconds = eligibleCount * minInterval;
+  const estimatedDurationMinutes = Math.ceil(totalEstimatedSeconds / 60);
+
+  const pendingJobsCount = db.sendingJobs.filter((j) => j.campaignId === camp.id && (j.status === 'queued' || j.status === 'retrying')).length;
+
+  res.json({
+    campaignId: camp.id,
+    campaignName: camp.name,
+    status: camp.status,
+    totalLeads,
+    eligibleCount,
+    excludedCount: {
+      total: unsubscribedCount + bouncedCount + repliedCount,
+      unsubscribed: unsubscribedCount,
+      bounced: bouncedCount,
+      replied: repliedCount,
+    },
+    assignedMailboxesCount: assignedMailboxes.length,
+    connectedMailboxes: connectedMailboxes.map((m) => ({
+      id: m.id,
+      email: m.email,
+      name: m.name,
+      provider: m.provider,
+    })),
+    firstStepSubject,
+    estimatedDurationMinutes,
+    timezone: camp.schedule?.timezone || 'America/Los_Angeles',
+    scheduledDays: camp.schedule?.sendingDays || [1, 2, 3, 4, 5],
+    dailyWindow: `${camp.schedule?.startTime || '09:00'} - ${camp.schedule?.endTime || '17:00'}`,
+    dailyLimit: camp.settings?.dailyLimit || 50,
+    queueCount: pendingJobsCount,
+  });
+});
+
+/**
+ * Dedicated "Send Campaign Now" endpoint
+ * Confirmed by user: directly enrolls leads, sets status=active, turns on worker, initiates sending
+ */
+app.post('/api/campaigns/:id/send-now', async (req: Request, res: Response) => {
+  const db = getDatabase();
+  const camp = db.campaigns.find((c) => c.id === req.params.id);
+  if (!camp) return res.status(404).json({ error: 'Campaign not found' });
+
+  // Update status & metadata
+  camp.status = 'active';
+  camp.launchType = 'immediate';
+  camp.launchedAt = new Date().toISOString();
+  camp.updatedAt = new Date().toISOString();
+
+  // Enroll leads with forceNow = true so schedule window does not block immediate send
+  const enqueuedCount = enrollCampaignLeadsIntoQueue(camp, new Date(), true);
+
+  // Turn on worker sending dispatch
+  setWorkerSendingActive(true);
+
+  // Record audit log
+  db.auditLogs.unshift({
+    id: `log-${Date.now()}`,
+    action: 'CAMPAIGN_SEND_NOW',
+    details: `Immediate sending confirmed for "${camp.name}" (${enqueuedCount} jobs enqueued). Background worker activated.`,
+    timestamp: new Date().toISOString(),
+  });
+
+  saveDatabase(db);
+
+  // Trigger dispatch batch immediately
+  const batchResult = await processOutboundSendingBatch();
+
+  res.json({
+    success: true,
+    campaign: camp,
+    enqueuedCount,
+    batchResult,
+    message: `Immediate sending initiated for "${camp.name}". ${enqueuedCount} email(s) queued for delivery.`,
+  });
+});
+
+/**
+ * Dedicated "Schedule Campaign" endpoint
+ * Saves schedule parameters and sets status=scheduled without enrolling premature jobs
+ */
+app.post('/api/campaigns/:id/schedule', (req: Request, res: Response) => {
+  const db = getDatabase();
+  const camp = db.campaigns.find((c) => c.id === req.params.id);
+  if (!camp) return res.status(404).json({ error: 'Campaign not found' });
+
+  const { scheduledStartAt, schedule, mailboxAccountIds, settings } = req.body;
+
+  if (schedule) {
+    camp.schedule = { ...camp.schedule, ...schedule };
+  }
+  if (mailboxAccountIds && Array.isArray(mailboxAccountIds)) {
+    camp.mailboxAccountIds = mailboxAccountIds;
+  }
+  if (settings) {
+    camp.settings = { ...camp.settings, ...settings };
+  }
+
+  camp.status = 'scheduled';
+  camp.launchType = 'scheduled';
+  camp.scheduledStartAt = scheduledStartAt || camp.schedule?.startDate;
+  camp.updatedAt = new Date().toISOString();
+
+  db.auditLogs.unshift({
+    id: `log-${Date.now()}`,
+    action: 'CAMPAIGN_SCHEDULED',
+    details: `Campaign "${camp.name}" scheduled to start at ${camp.scheduledStartAt}`,
+    timestamp: new Date().toISOString(),
+  });
+
+  saveDatabase(db);
+
+  res.json({
+    success: true,
+    campaign: camp,
+    message: `Campaign "${camp.name}" successfully scheduled for ${new Date(camp.scheduledStartAt || '').toLocaleString()}.`,
+  });
+});
+
 // ==========================================
 // 5. EMAIL ACCOUNTS & MAILBOX ROTATION
 // ==========================================
@@ -950,7 +1111,45 @@ app.post('/api/mailboxes/:id/test-connection', async (req: Request, res: Respons
     });
   }
 
-  // Google or Microsoft OAuth check
+  // Gmail OAuth check & proactive auto-refresh
+  if (mb.provider === 'gmail') {
+    const tokenResult = await ensureValidGmailToken(mb);
+    mb.lastSyncAt = new Date().toISOString();
+
+    if (tokenResult.token) {
+      mb.status = 'connected';
+      mb.lastError = undefined;
+      saveDatabase(db);
+      return res.json({
+        success: true,
+        status: 'connected',
+        message: `Gmail OAuth credentials validated & active for ${mb.email}`,
+      });
+    }
+
+    if (tokenResult.reauthRequired) {
+      mb.status = 'reauth_required';
+      mb.lastError = tokenResult.error || 'Google re-authorization required';
+      saveDatabase(db);
+      return res.json({
+        success: false,
+        status: 'reauth_required',
+        reauthRequired: true,
+        message: mb.lastError,
+      });
+    }
+
+    mb.status = 'temporary_error';
+    mb.lastError = tokenResult.error || 'Connection error';
+    saveDatabase(db);
+    return res.json({
+      success: false,
+      status: 'temporary_error',
+      message: mb.lastError,
+    });
+  }
+
+  // Microsoft OAuth check
   const token = mb.oauth?.accessToken;
   const hasAuth = Boolean(token || mb.oauth?.refreshToken);
   mb.lastSyncAt = new Date().toISOString();
@@ -961,6 +1160,7 @@ app.post('/api/mailboxes/:id/test-connection', async (req: Request, res: Respons
     saveDatabase(db);
     return res.json({
       success: false,
+      status: 'error',
       message: mb.lastError,
     });
   }
@@ -971,6 +1171,7 @@ app.post('/api/mailboxes/:id/test-connection', async (req: Request, res: Respons
 
   res.json({
     success: true,
+    status: 'connected',
     message: `${mb.provider.toUpperCase()} OAuth credentials configured and active for ${mb.email}`,
   });
 });
@@ -980,8 +1181,33 @@ app.post('/api/mailboxes/:id/sync-replies', async (req: Request, res: Response) 
   const mb = db.mailboxes.find((m) => m.id === req.params.id);
   if (!mb) return res.status(404).json({ error: 'Mailbox not found' });
 
-  const result = await syncAllMailboxReplies();
-  res.json({ success: true, ...result });
+  mb.status = 'synchronizing';
+  saveDatabase(db);
+
+  try {
+    const result = await syncAllMailboxReplies();
+    const updatedMb = db.mailboxes.find((m) => m.id === req.params.id);
+    const finalStatus = updatedMb?.status || 'sync_completed';
+
+    res.json({
+      success: finalStatus !== 'reauth_required' && finalStatus !== 'error',
+      status: finalStatus,
+      reauthRequired: finalStatus === 'reauth_required',
+      message: finalStatus === 'reauth_required'
+        ? (updatedMb?.lastError || 'Google authorization expired. Reconnect required.')
+        : `Synced inbound messages successfully.`,
+      ...result,
+    });
+  } catch (err: any) {
+    mb.status = 'temporary_error';
+    mb.lastError = err.message;
+    saveDatabase(db);
+    res.json({
+      success: false,
+      status: 'temporary_error',
+      message: `Reply sync error: ${err.message}`,
+    });
+  }
 });
 
 app.put('/api/mailboxes/:id', (req: Request, res: Response) => {
@@ -1413,13 +1639,136 @@ app.post('/api/worker/sync-replies', async (req: Request, res: Response) => {
   res.json(result);
 });
 
+app.post('/api/queue/kill-switch', (req: Request, res: Response) => {
+  const result = activateKillSwitch();
+  res.json({
+    success: true,
+    message: `Global Kill Switch engaged: ${result.pausedCampaigns} campaign(s) paused, ${result.cancelledJobs} queue job(s) cancelled. Worker sending halted.`,
+    ...result,
+  });
+});
+
+app.post('/api/queue/pause-all', (req: Request, res: Response) => {
+  const count = pauseAllCampaigns();
+  res.json({
+    success: true,
+    pausedCampaigns: count,
+    message: `Paused ${count} active & scheduled campaign(s).`,
+  });
+});
+
+app.post('/api/queue/clear-pending', (req: Request, res: Response) => {
+  const count = clearPendingQueue();
+  res.json({
+    success: true,
+    clearedJobs: count,
+    message: `Cleared ${count} pending jobs from queue.`,
+  });
+});
+
 app.get('/api/worker/status', (req: Request, res: Response) => {
   const stats = getQueueStats();
   res.json({
     isRunning: true,
+    sendingActive: isWorkerSendingActive(),
     stats,
     lastCheck: new Date().toISOString(),
   });
+});
+
+app.post('/api/worker/toggle', (req: Request, res: Response) => {
+  const next = !isWorkerSendingActive();
+  setWorkerSendingActive(next);
+  res.json({
+    success: true,
+    sendingActive: next,
+    message: next ? 'Worker sending active. Dispatch enabled.' : 'Worker sending paused. Outbox dispatch halted.',
+  });
+});
+
+app.post('/api/deliverability/dns-check', async (req: Request, res: Response) => {
+  const rawDomain = (req.body?.domain || '').trim().toLowerCase();
+  const domain = rawDomain.replace(/^https?:\/\//, '').split('/')[0];
+
+  if (!domain || !domain.includes('.')) {
+    return res.status(400).json({ error: 'Please enter a valid domain name (e.g. apexoutbound.io)' });
+  }
+
+  try {
+    let spfRecord: string | null = null;
+    let dkimRecord: string | null = null;
+    let dmarcRecord: string | null = null;
+    let mxRecords: dns.MxRecord[] = [];
+
+    // 1. Resolve TXT records for SPF
+    try {
+      const txt = await dns.promises.resolveTxt(domain);
+      const flatTxt = txt.map((chunk) => chunk.join(''));
+      const foundSpf = flatTxt.find((r) => r.startsWith('v=spf1'));
+      if (foundSpf) spfRecord = foundSpf;
+    } catch (_) {}
+
+    // 2. Resolve TXT for DMARC
+    try {
+      const dmarcTxt = await dns.promises.resolveTxt(`_dmarc.${domain}`);
+      const flatDmarc = dmarcTxt.map((chunk) => chunk.join(''));
+      const foundDmarc = flatDmarc.find((r) => r.startsWith('v=DMARC1'));
+      if (foundDmarc) dmarcRecord = foundDmarc;
+    } catch (_) {}
+
+    // 3. Resolve DKIM (standard common selectors)
+    for (const selector of ['google', 'default', 'k1', 'selector1', 'mail']) {
+      try {
+        const dkimTxt = await dns.promises.resolveTxt(`${selector}._domainkey.${domain}`);
+        const flatDkim = dkimTxt.map((chunk) => chunk.join(''));
+        const foundDkim = flatDkim.find((r) => r.includes('v=DKIM1') || r.includes('p='));
+        if (foundDkim) {
+          dkimRecord = `${selector}._domainkey.${domain}: ${foundDkim.substring(0, 60)}...`;
+          break;
+        }
+      } catch (_) {}
+    }
+
+    // 4. Resolve MX
+    try {
+      mxRecords = await dns.promises.resolveMx(domain);
+    } catch (_) {}
+
+    // Calculate score based on actual verified records
+    let score = 0;
+    if (spfRecord) score += 30;
+    if (dmarcRecord) score += 30;
+    if (dkimRecord) score += 20;
+    if (mxRecords.length > 0) score += 20;
+
+    res.json({
+      domain,
+      score,
+      testedAt: new Date().toISOString(),
+      spf: {
+        configured: Boolean(spfRecord),
+        record: spfRecord || 'No SPF (v=spf1) record published',
+        status: spfRecord ? 'valid' : 'missing',
+      },
+      dkim: {
+        configured: Boolean(dkimRecord),
+        record: dkimRecord || 'No DKIM record detected (tested common selectors)',
+        status: dkimRecord ? 'valid' : 'not_detected',
+      },
+      dmarc: {
+        configured: Boolean(dmarcRecord),
+        record: dmarcRecord || 'No DMARC (_dmarc) policy published',
+        status: dmarcRecord ? 'enforced' : 'missing',
+      },
+      mx: {
+        configured: mxRecords.length > 0,
+        records: mxRecords.map((m) => `${m.priority} ${m.exchange}`),
+        status: mxRecords.length > 0 ? 'verified' : 'missing',
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: `DNS query failed: ${err.message}` });
+  }
 });
 
 app.post('/api/worker/simulate-reply', (req: Request, res: Response) => {

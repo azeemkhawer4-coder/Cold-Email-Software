@@ -79,7 +79,7 @@ export interface CampaignStep {
   };
 }
 
-export type CampaignStatus = 'draft' | 'active' | 'paused' | 'completed';
+export type CampaignStatus = 'draft' | 'scheduled' | 'active' | 'paused' | 'completed' | 'cancelled' | 'failed';
 
 export interface CampaignSchedule {
   startDate: string;
@@ -138,12 +138,23 @@ export interface Campaign {
   settings: CampaignSettings;
   steps: CampaignStep[];
   stats: CampaignStats;
+  launchType?: 'immediate' | 'scheduled';
+  scheduledStartAt?: string;
+  launchedAt?: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export type MailboxProvider = 'gmail' | 'outlook' | 'smtp';
-export type MailboxStatus = 'connected' | 'paused' | 'error';
+export type MailboxStatus =
+  | 'connected'
+  | 'synchronizing'
+  | 'sync_completed'
+  | 'temporary_error'
+  | 'reauth_required'
+  | 'disconnected'
+  | 'paused'
+  | 'error';
 
 export interface MailboxOAuthConfig {
   accessToken?: string;

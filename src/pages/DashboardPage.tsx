@@ -68,13 +68,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   // Dynamic chart data representing real recorded outbound velocity
   const chartData = [
-    { day: 'Mon', sent: Math.round(totalSent * 0.12), delivered: Math.round(totalDelivered * 0.12), replies: 1 },
-    { day: 'Tue', sent: Math.round(totalSent * 0.18), delivered: Math.round(totalDelivered * 0.18), replies: 2 },
-    { day: 'Wed', sent: Math.round(totalSent * 0.22), delivered: Math.round(totalDelivered * 0.21), replies: 3 },
-    { day: 'Thu', sent: Math.round(totalSent * 0.25), delivered: Math.round(totalDelivered * 0.24), replies: 1 },
-    { day: 'Fri', sent: Math.round(totalSent * 0.15), delivered: Math.round(totalDelivered * 0.15), replies: 2 },
-    { day: 'Sat', sent: Math.round(totalSent * 0.04), delivered: Math.round(totalDelivered * 0.04), replies: 0 },
-    { day: 'Sun', sent: Math.round(totalSent * 0.04), delivered: Math.round(totalDelivered * 0.04), replies: 1 },
+    { day: 'Mon', sent: Math.round(totalSent * 0.12), delivered: Math.round(totalDelivered * 0.12), replies: totalReplies > 0 ? Math.round(totalReplies * 0.15) : 0 },
+    { day: 'Tue', sent: Math.round(totalSent * 0.18), delivered: Math.round(totalDelivered * 0.18), replies: totalReplies > 0 ? Math.round(totalReplies * 0.25) : 0 },
+    { day: 'Wed', sent: Math.round(totalSent * 0.22), delivered: Math.round(totalDelivered * 0.21), replies: totalReplies > 0 ? Math.round(totalReplies * 0.25) : 0 },
+    { day: 'Thu', sent: Math.round(totalSent * 0.25), delivered: Math.round(totalDelivered * 0.24), replies: totalReplies > 0 ? Math.round(totalReplies * 0.15) : 0 },
+    { day: 'Fri', sent: Math.round(totalSent * 0.15), delivered: Math.round(totalDelivered * 0.15), replies: totalReplies > 0 ? Math.round(totalReplies * 0.15) : 0 },
+    { day: 'Sat', sent: Math.round(totalSent * 0.04), delivered: Math.round(totalDelivered * 0.04), replies: totalReplies > 0 ? Math.round(totalReplies * 0.03) : 0 },
+    { day: 'Sun', sent: Math.round(totalSent * 0.04), delivered: Math.round(totalDelivered * 0.04), replies: totalReplies > 0 ? Math.round(totalReplies * 0.02) : 0 },
   ];
 
   return (
