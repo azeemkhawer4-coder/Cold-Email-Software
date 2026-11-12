@@ -207,11 +207,11 @@ export function resolveNextSequenceStep(
 /**
  * Enrolls eligible leads for a campaign into the durable sending queue
  */
-export function enrollCampaignLeadsIntoQueue(campaign: Campaign, now = new Date()): number {
+export function enrollCampaignLeadsIntoQueue(campaign: Campaign, now = new Date(), ignoreScheduleWindow = false): number {
   const db = getDatabase();
 
-  // If outside schedule window, don't enqueue now
-  if (!isWithinScheduleWindow(campaign.schedule, now)) {
+  // If outside schedule window and not forced, don't enqueue now
+  if (!ignoreScheduleWindow && !isWithinScheduleWindow(campaign.schedule, now)) {
     return 0;
   }
 

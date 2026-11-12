@@ -53,17 +53,35 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
   const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
   const [isBuilderOpen, setIsBuilderOpen] = useState(openCreateWizard);
   const [campaignToDelete, setCampaignToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [launchFeedback, setLaunchFeedback] = useState<{
+    id: string;
+    reason: string;
+    inScheduleWindow: boolean;
+    batchResult?: { processedCount: number; failedCount: number; errors: string[] };
+  } | null>(null);
 
   React.useEffect(() => {
     setIsBuilderOpen(openCreateWizard);
   }, [openCreateWizard]);
 
-  const handleLaunchCampaign = async (id: string) => {
+  const handleLaunchCampaign = async (id: string, forceNow = false) => {
     try {
-      const res = await fetch(`/api/campaigns/${id}/launch`, { method: 'POST' });
+      const res = await fetch(`/api/campaigns/${id}/launch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ forceNow }),
+      });
       const data = await res.json();
       if (data.success) {
-        confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 } });
+        if (data.batchResult?.processedCount > 0) {
+          confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 } });
+        }
+        setLaunchFeedback({
+          id,
+          reason: data.reason || 'Campaign activated.',
+          inScheduleWindow: data.inScheduleWindow ?? true,
+          batchResult: data.batchResult,
+        });
         onRefreshCampaigns();
       }
     } catch (e) {
@@ -143,6 +161,49 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
           $0.00 Relay Fees (Direct Provider Dispatch)
         </span>
       </div>
+
+      {/* Launch Feedback & Schedule Notice Banner */}
+      {launchFeedback && (
+        <div
+          className={`rounded-xl border p-4 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md transition-all ${
+            launchFeedback.batchResult && launchFeedback.batchResult.processedCount > 0
+              ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
+              : !launchFeedback.inScheduleWindow
+              ? 'bg-amber-950/30 border-amber-500/40 text-amber-200'
+              : 'bg-blue-950/40 border-blue-500/40 text-blue-200'
+          }`}
+        >
+          <div className="flex items-start gap-2.5">
+            <span className="text-lg mt-0.5 shrink-0">
+              {launchFeedback.batchResult && launchFeedback.batchResult.processedCount > 0 ? '🚀' : '⏰'}
+            </span>
+            <div>
+              <p className="font-semibold text-white">
+                {launchFeedback.batchResult && launchFeedback.batchResult.processedCount > 0
+                  ? `Campaign Live: Dispatched ${launchFeedback.batchResult.processedCount} email(s) immediately`
+                  : 'Campaign Launch Status'}
+              </p>
+              <p className="mt-0.5 text-slate-300 leading-relaxed">{launchFeedback.reason}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+            {!launchFeedback.inScheduleWindow && (
+              <button
+                onClick={() => handleLaunchCampaign(launchFeedback.id, true)}
+                className="px-3 py-1.5 rounded-lg bg-amber-500 text-slate-950 font-semibold hover:bg-amber-400 transition cursor-pointer text-xs shadow-xs"
+              >
+                Send First Batch Immediately
+              </button>
+            )}
+            <button
+              onClick={() => setLaunchFeedback(null)}
+              className="p-1 rounded text-slate-400 hover:text-white transition cursor-pointer text-xs font-mono"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Campaigns Listing Table */}
       <div className="surface-card rounded-xl overflow-hidden">

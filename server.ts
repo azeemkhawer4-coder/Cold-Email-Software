@@ -34,7 +34,7 @@ import {
   clearTransporterCache,
 } from './src/server/adapters/smtpImapAdapter';
 import { fileURLToPath } from 'url';
-import { enrollAllActiveCampaigns } from './src/server/scheduler';
+import { enrollAllActiveCampaigns, enrollCampaignLeadsIntoQueue, isWithinScheduleWindow } from './src/server/scheduler';
 import { validateEmailSyntax, parseCsvRows, autoDetectColumnMappings } from './src/utils/emailValidator';
 import { Lead, Campaign, MailboxAccount, Deal, Automation, Company, Task, ZeroCostStatus } from './src/types';
 
@@ -789,26 +789,64 @@ app.post('/api/campaigns/:id/launch', async (req: Request, res: Response) => {
   const camp = db.campaigns.find((c) => c.id === req.params.id);
   if (!camp) return res.status(404).json({ error: 'Campaign not found' });
 
+  const forceNow = Boolean(req.body?.forceNow || req.query?.forceNow === 'true');
+
   camp.status = 'active';
   camp.updatedAt = new Date().toISOString();
 
-  // Enroll leads from selected list if not already enrolled
-  const leadsInList = db.leads.filter((l) => l.listId === camp.leadListId);
+  // Determine candidate leads in list or campaign
+  const leadsInList = db.leads.filter((l) => l.listId === camp.leadListId || l.campaignId === camp.id);
   camp.stats.enrolled = leadsInList.length;
 
   db.auditLogs.unshift({
     id: `log-${Date.now()}`,
     action: 'CAMPAIGN_LAUNCHED',
-    details: `Launched campaign "${camp.name}" with ${leadsInList.length} enrolled leads`,
+    details: `Launched campaign "${camp.name}" with ${leadsInList.length} enrolled leads (forceNow: ${forceNow})`,
     timestamp: new Date().toISOString(),
   });
 
   saveDatabase(db);
 
-  // Trigger worker dispatch batch immediately
-  const batchResult = await processOutboundSendingBatch();
+  const now = new Date();
+  const inScheduleWindow = isWithinScheduleWindow(camp.schedule, now);
 
-  res.json({ success: true, campaign: camp, batchResult });
+  // Directly enroll candidate leads into the sending queue
+  const enqueuedCount = enrollCampaignLeadsIntoQueue(camp, now, forceNow);
+
+  // Trigger outbound sending batch immediately
+  let batchResult = { processedCount: 0, failedCount: 0, errors: [] as string[] };
+  if (inScheduleWindow || forceNow) {
+    batchResult = await processOutboundSendingBatch();
+  }
+
+  // Diagnostics: provide explicit explanation of current state
+  let reason = '';
+  if (batchResult.processedCount > 0) {
+    reason = `Successfully dispatched ${batchResult.processedCount} email(s) immediately.`;
+  } else if (!inScheduleWindow && !forceNow) {
+    const days = camp.schedule.sendingDays?.join(', ') || 'Mon-Fri';
+    reason = `Campaign is active, but current time is outside the designated sending window (${camp.schedule.startTime || '08:30'} - ${camp.schedule.endTime || '17:30'}, days ${days}). Sending will start automatically when the schedule window opens.`;
+  } else if (leadsInList.length === 0) {
+    reason = `Campaign is active, but the assigned lead list has 0 leads. Import or assign leads to start sending.`;
+  } else if (!camp.mailboxAccountIds || camp.mailboxAccountIds.length === 0) {
+    reason = `Campaign is active, but no mailboxes are assigned. Connect and select a sending mailbox under Campaign Settings.`;
+  } else {
+    const connectedMailboxes = db.mailboxes.filter((m) => camp.mailboxAccountIds.includes(m.id) && m.status === 'connected');
+    if (connectedMailboxes.length === 0) {
+      reason = `Assigned mailboxes are disconnected or paused. Reconnect your sending mailbox under Email Accounts.`;
+    } else {
+      reason = `${enqueuedCount} lead(s) enqueued in the sending queue. Background worker is actively processing.`;
+    }
+  }
+
+  res.json({
+    success: true,
+    campaign: camp,
+    inScheduleWindow,
+    enqueuedCount,
+    batchResult,
+    reason,
+  });
 });
 
 app.post('/api/campaigns/:id/pause', (req: Request, res: Response) => {

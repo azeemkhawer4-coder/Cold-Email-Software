@@ -11,6 +11,24 @@ export const migrations: Migration[] = [
     version: 1,
     name: '001_initial_complete_schema',
     up: (db: Database.Database) => {
+      // Clean up legacy incompatible tables if found from prior schema versions
+      try {
+        const leadCols = (db.prepare('PRAGMA table_info(leads)').all() as any[]).map((c) => c.name);
+        if (leadCols.length > 0 && !leadCols.includes('workspace_id')) {
+          console.log('[Migrations] Legacy table format detected. Upgrading tables to normalized schema...');
+          db.exec(`
+            DROP TABLE IF EXISTS kv_store;
+            DROP TABLE IF EXISTS leads;
+            DROP TABLE IF EXISTS companies;
+            DROP TABLE IF EXISTS campaigns;
+            DROP TABLE IF EXISTS campaign_steps;
+            DROP TABLE IF EXISTS email_accounts;
+            DROP TABLE IF EXISTS sending_jobs;
+            DROP TABLE IF EXISTS tasks;
+          `);
+        }
+      } catch (_) {}
+
       // 1. Users & Local Sessions
       db.exec(`
         CREATE TABLE IF NOT EXISTS users (
