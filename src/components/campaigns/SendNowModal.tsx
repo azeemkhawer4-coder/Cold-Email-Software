@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Send, AlertTriangle, CheckCircle2, X, Clock, Users, Mail, ShieldAlert, Sparkles } from 'lucide-react';
+import { Send, AlertTriangle, X, Clock, Users, Mail, ShieldAlert } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Campaign } from '../../types';
 
@@ -21,8 +21,8 @@ export const SendNowModal: React.FC<SendNowModalProps> = ({ campaign, onClose, o
       try {
         setLoading(true);
         const res = await fetch(`/api/campaigns/${campaign.id}/prelaunch-summary`);
-        if (!res.ok) throw new Error('Failed to load pre-launch diagnostic summary');
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Failed to load pre-launch diagnostic summary');
         if (isMounted) setSummary(data);
       } catch (err: any) {
         if (isMounted) setError(err.message);
@@ -44,7 +44,7 @@ export const SendNowModal: React.FC<SendNowModalProps> = ({ campaign, onClose, o
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.success) {
         throw new Error(data.error || data.message || 'Failed to initiate campaign sending');
       }
@@ -141,17 +141,26 @@ export const SendNowModal: React.FC<SendNowModalProps> = ({ campaign, onClose, o
 
             {/* Dispatch details */}
             <div className="rounded-xl bg-slate-900/60 border border-slate-800/80 p-3 space-y-2 text-[11px]">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400 flex items-center gap-1.5">
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-slate-400 flex items-center gap-1.5 shrink-0">
                   <Mail className="h-3.5 w-3.5 text-blue-400" /> Connected Mailboxes:
                 </span>
-                <span className="font-mono text-white font-medium">
+                <div className="flex flex-wrap items-center justify-end gap-1.5 font-mono text-white font-medium">
                   {summary.connectedMailboxes.length > 0 ? (
-                    summary.connectedMailboxes.map((m: any) => m.email).join(', ')
+                    summary.connectedMailboxes.map((m: any) => (
+                      <span key={m.id || m.email} className="inline-flex items-center gap-1">
+                        <span>{m.email}</span>
+                        {m.isTestMailbox && (
+                          <span className="rounded bg-amber-500/15 border border-amber-500/30 px-1 py-0.2 text-[9px] text-amber-300">
+                            TEST RIG
+                          </span>
+                        )}
+                      </span>
+                    ))
                   ) : (
                     <span className="text-rose-400">None connected (Required)</span>
                   )}
-                </span>
+                </div>
               </div>
 
               <div className="flex items-center justify-between">
@@ -167,7 +176,7 @@ export const SendNowModal: React.FC<SendNowModalProps> = ({ campaign, onClose, o
             {summary.connectedMailboxes.length === 0 && (
               <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] flex items-center gap-2">
                 <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
-                <span>No active connected mailboxes assigned. Connect a sending account in Email Accounts first.</span>
+                <span>No active connected mailboxes assigned. Connect or reconnect a sending account in Email Accounts first.</span>
               </div>
             )}
           </div>

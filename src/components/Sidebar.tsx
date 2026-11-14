@@ -21,6 +21,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { PWAInstallButton } from './PWAInstallButton';
+import { WorkspaceSettings } from '../types';
 
 export type NavigationItem =
   | 'dashboard'
@@ -45,6 +46,8 @@ interface SidebarProps {
   onToggleCollapse: () => void;
   unreadCount: number;
   onOpenCreateCampaign: () => void;
+  workspace?: WorkspaceSettings | null;
+  currentUser?: { name?: string; email?: string } | null;
 }
 
 const navItems: { id: NavigationItem; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -71,7 +74,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleCollapse,
   unreadCount,
   onOpenCreateCampaign,
+  workspace,
+  currentUser,
 }) => {
+  const displayWorkspaceName = workspace?.name || 'Local Workspace';
+  const displayUserName = currentUser?.name || workspace?.companyName || 'Local Operator';
+  const displayUserEmail = currentUser?.email || workspace?.ownerEmail || 'local@outboundos.local';
+  const initials = displayUserName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || '')
+    .join('') || 'LO';
+
   return (
     <aside
       className={`relative flex flex-col border-r border-slate-800/80 bg-[#080d19]/95 backdrop-blur-xl transition-all duration-200 select-none z-20 ${
@@ -89,10 +104,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span className="text-sm font-bold tracking-tight text-white flex items-center gap-1.5">
                 OutboundOS
                 <span className="rounded bg-slate-800 border border-slate-700/80 px-1.5 py-0.2 text-[9px] font-mono font-medium text-slate-300 uppercase tracking-wider">
-                  Pro
+                  Local
                 </span>
               </span>
-              <span className="text-[11px] text-slate-400 truncate">Enterprise Sales Engine</span>
+              <span className="text-[11px] text-slate-400 truncate">Outreach Automation</span>
             </div>
           )}
         </div>
@@ -111,7 +126,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex items-center justify-between rounded-lg bg-slate-900/60 border border-slate-800 px-2.5 py-1.5 text-xs">
             <div className="flex items-center gap-2 truncate">
               <Building2 className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-              <span className="font-medium text-slate-300 truncate">Apex Growth Labs</span>
+              <span className="font-medium text-slate-300 truncate">{displayWorkspaceName}</span>
             </div>
             <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400 font-medium">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -172,13 +187,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex items-center gap-2.5 pt-1">
             <div className="relative">
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-slate-800 text-xs font-semibold text-slate-200 border border-slate-700">
-                AK
+                {initials}
               </div>
               <span className="absolute bottom-0 right-0 h-2 w-2 rounded-full bg-emerald-400 ring-2 ring-[#080d19]" />
             </div>
             <div className="flex flex-col truncate">
-              <span className="text-xs font-medium text-slate-200 truncate">Azeem Khawer</span>
-              <span className="text-[10px] text-slate-500 truncate font-mono">owner@apexoutbound.io</span>
+              <span className="text-xs font-medium text-slate-200 truncate">{displayUserName}</span>
+              <span className="text-[10px] text-slate-500 truncate font-mono">{displayUserEmail}</span>
             </div>
           </div>
         )}

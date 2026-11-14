@@ -14,10 +14,11 @@ import {
   Server,
   Key,
   FlaskConical,
-  Inbox,
   ArrowDownLeft,
+  RefreshCw,
 } from 'lucide-react';
 import { MailboxAccount } from '../types';
+import { isProductionMailboxConnected } from '../utils/analyticsStats';
 
 interface EmailAccountsPageProps {
   mailboxes: MailboxAccount[];
@@ -35,15 +36,31 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
   const [isProvisioningTest, setIsProvisioningTest] = useState(false);
   const [testResult, setTestResult] = useState<{ id: string; message: string; success: boolean } | null>(null);
   const [syncResult, setSyncResult] = useState<{ id: string; message: string; success: boolean } | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
   const [mailboxToDelete, setMailboxToDelete] = useState<{ id: string; email: string } | null>(null);
+
+  const connectedProdMailboxes = mailboxes.filter(isProductionMailboxConnected);
+  const reauthMailboxes = mailboxes.filter(
+    (m) => m.status === 'reauth_required' || m.status === 'error'
+  );
+  const safeDailyCapacity = connectedProdMailboxes.reduce(
+    (acc, m) => acc + (m.dailyLimit || 0),
+    0
+  );
 
   const handleTestConnection = async (id: string) => {
     setTestingId(id);
     setTestResult(null);
+    setPageError(null);
     try {
       const res = await fetch(`/api/mailboxes/${id}/test-connection`, { method: 'POST' });
-      const data = await res.json();
-      setTestResult({ id, message: data.message, success: data.success });
+      const data = await res.json().catch(() => ({}));
+      const isOk = res.ok && Boolean(data.success);
+      const msg =
+        data.message ||
+        data.error ||
+        (res.ok ? 'Connection check finished' : `HTTP ${res.status} verification failed`);
+      setTestResult({ id, message: msg, success: isOk });
       onRefreshMailboxes();
     } catch (e: any) {
       setTestResult({ id, message: e.message || 'Connection test failed', success: false });
@@ -55,14 +72,23 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
   const handleSyncReplies = async (id: string) => {
     setSyncingId(id);
     setSyncResult(null);
+    setPageError(null);
     try {
       const res = await fetch(`/api/mailboxes/${id}/sync-replies`, { method: 'POST' });
-      const data = await res.json();
-      setSyncResult({
-        id,
-        message: `Synced ${data.syncedCount || 0} inbound reply message(s) from server`,
-        success: true,
-      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.success === false) {
+        setSyncResult({
+          id,
+          message: data.message || data.error || `Sync failed (HTTP ${res.status})`,
+          success: false,
+        });
+      } else {
+        setSyncResult({
+          id,
+          message: `Synced ${data.syncedCount || 0} inbound reply message(s) from server`,
+          success: true,
+        });
+      }
       onRefreshMailboxes();
     } catch (e: any) {
       setSyncResult({ id, message: e.message || 'Sync failed', success: false });
@@ -73,35 +99,47 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
 
   const handleProvisionTestMailbox = async () => {
     setIsProvisioningTest(true);
+    setPageError(null);
     try {
       const res = await fetch('/api/mailboxes/provision-test-mailbox', { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
         onRefreshMailboxes();
         setTestResult({
           id: data.mailbox.id,
           message: `Controlled test mailbox ${data.mailbox.email} provisioned successfully with real SMTP & IMAP credentials!`,
           success: true,
         });
+      } else {
+        setPageError(data.error || data.message || 'Failed to provision test mailbox');
       }
     } catch (err: any) {
-      console.error(err);
+      setPageError(err.message || 'Failed to provision test mailbox');
     } finally {
       setIsProvisioningTest(false);
     }
   };
 
   const handleToggleStatus = async (mb: MailboxAccount) => {
+    setPageError(null);
+    if (mb.status === 'reauth_required') {
+      await handleTestConnection(mb.id);
+      return;
+    }
     const nextStatus = mb.status === 'connected' ? 'paused' : 'connected';
     try {
-      await fetch(`/api/mailboxes/${mb.id}`, {
+      const res = await fetch(`/api/mailboxes/${mb.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: nextStatus }),
       });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setPageError(err.error || 'Failed to update mailbox status');
+      }
       onRefreshMailboxes();
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      setPageError(e.message || 'Failed to update mailbox status');
     }
   };
 
@@ -111,12 +149,17 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
 
   const confirmDeleteMailbox = async () => {
     if (!mailboxToDelete) return;
+    setPageError(null);
     try {
-      await fetch(`/api/mailboxes/${mailboxToDelete.id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/mailboxes/${mailboxToDelete.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        setPageError(err.error || 'Failed to delete mailbox');
+      }
       setMailboxToDelete(null);
       onRefreshMailboxes();
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      setPageError(e.message || 'Failed to delete mailbox');
     }
   };
 
@@ -125,10 +168,10 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+          <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2 flex-wrap">
             Sending Email Accounts & Mailbox Rotation
             <span className="rounded bg-slate-900 border border-slate-800 px-2 py-0.5 text-xs font-mono font-medium text-blue-400 tabular-nums">
-              {mailboxes.length} Connected
+              {connectedProdMailboxes.length} Connected · {mailboxes.length} Total
             </span>
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -162,21 +205,74 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
         </div>
       </div>
 
+      {/* Page Error Banner */}
+      {pageError && (
+        <div className="rounded-xl bg-rose-950/40 border border-rose-700/60 p-3.5 text-xs text-rose-200 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
+            <span>{pageError}</span>
+          </div>
+          <button onClick={() => setPageError(null)} className="text-rose-300 hover:text-white cursor-pointer">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
+      {/* Prominent Top Re-Auth Alert Banner */}
+      {reauthMailboxes.length > 0 && (
+        <div className="rounded-xl bg-rose-950/40 border border-rose-600/50 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="h-5 w-5 text-rose-400 shrink-0 mt-0.5" />
+            <div className="space-y-0.5">
+              <span className="font-bold text-rose-200 block">
+                {reauthMailboxes.length} Mailbox{reauthMailboxes.length > 1 ? 'es' : ''} Require Re-Authentication
+              </span>
+              <span className="text-rose-200/80 block">
+                Excluded from live rotation and safe capacity:{' '}
+                <span className="font-mono text-white">
+                  {reauthMailboxes.map((m) => m.email).join(', ')}
+                </span>
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {reauthMailboxes.some((m) => m.provider === 'gmail') && (
+              <a
+                href="/api/auth/google"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 px-3 py-1.5 text-xs font-semibold text-white transition"
+              >
+                <Key className="h-3.5 w-3.5" />
+                Reconnect Google OAuth
+              </a>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Rotation Status Banner */}
       <div className="surface-card rounded-xl p-4 flex items-center justify-between text-xs text-blue-200">
         <div className="flex items-center gap-3">
           <ShieldCheck className="h-5 w-5 text-blue-400 shrink-0" />
           <div>
-            <span className="font-semibold text-white block">Multi-Mailbox Sender Balancing Active</span>
+            <span className="font-semibold text-white block">
+              {connectedProdMailboxes.length > 0
+                ? 'Multi-Mailbox Sender Balancing Active'
+                : 'No Production Mailboxes Connected'}
+            </span>
             <span className="text-slate-400">
-              Outbound sequences rotate dynamically across eligible inboxes to protect domain reputation and prevent rate limiting.
+              {connectedProdMailboxes.length > 0
+                ? 'Outbound sequences rotate dynamically across connected production inboxes to protect domain reputation.'
+                : 'Paused, disconnected, re-auth required, and Ethereal sandbox mailboxes are excluded from production sending capacity.'}
             </span>
           </div>
         </div>
-        <div className="text-right">
+        <div className="text-right shrink-0">
           <span className="text-[11px] text-slate-400 block font-mono">Total Safe Capacity</span>
           <span className="text-base font-bold text-white font-mono tabular-nums">
-            {mailboxes.reduce((acc, m) => acc + m.dailyLimit, 0)} emails/day
+            {safeDailyCapacity} emails/day
+          </span>
+          <span className="text-[10px] text-slate-500 block font-mono">
+            Across {connectedProdMailboxes.length} connected production account(s)
           </span>
         </div>
       </div>
@@ -184,11 +280,12 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
       {/* Accounts Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {mailboxes.map((mb) => {
-          const usedPct = Math.round((mb.sentToday / mb.dailyLimit) * 100);
+          const usedPct = mb.dailyLimit > 0 ? Math.round((mb.sentToday / mb.dailyLimit) * 100) : 0;
           const isTestingThis = testingId === mb.id;
           const isSyncingThis = syncingId === mb.id;
           const isResultForThis = testResult?.id === mb.id;
           const isSyncResultForThis = syncResult?.id === mb.id;
+          const isOAuth = mb.provider === 'gmail' || mb.provider === 'outlook';
 
           return (
             <div
@@ -196,8 +293,8 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
               className="surface-card surface-card-hover rounded-xl p-5 flex flex-col justify-between transition-all duration-150"
             >
               <div>
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-2.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2.5 min-w-0">
                     <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-800 text-blue-400 border border-slate-700 shrink-0">
                       {mb.isTestMailbox ? (
                         <FlaskConical className="h-4.5 w-4.5 text-indigo-400" />
@@ -209,7 +306,7 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
                       <div className="flex items-center gap-1.5">
                         <h3 className="text-sm font-semibold text-white truncate">{mb.name}</h3>
                         {mb.isTestMailbox && (
-                          <span className="rounded bg-indigo-950/80 border border-indigo-700/60 px-1.5 py-0.2 text-[9px] font-mono text-indigo-300">
+                          <span className="rounded bg-indigo-950/80 border border-indigo-700/60 px-1.5 py-0.2 text-[9px] font-mono text-indigo-300 shrink-0">
                             TEST RIG
                           </span>
                         )}
@@ -223,7 +320,7 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
                         case 'connected':
                           return { text: 'CONNECTED', cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' };
                         case 'sync_completed':
-                          return { text: 'SYNC COMPLETED', cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' };
+                          return { text: 'CONNECTED', cls: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' };
                         case 'synchronizing':
                           return { text: 'SYNCHRONIZING', cls: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30 animate-pulse' };
                         case 'reauth_required':
@@ -240,7 +337,7 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
                     };
                     const badge = getBadge(mb.status);
                     return (
-                      <span className={`rounded px-2 py-0.5 text-[9px] font-mono font-semibold uppercase tracking-wider border ${badge.cls}`}>
+                      <span className={`rounded px-2 py-0.5 text-[9px] font-mono font-semibold uppercase tracking-wider border shrink-0 ${badge.cls}`}>
                         {badge.text}
                       </span>
                     );
@@ -267,6 +364,36 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
                     </a>
                   )}
                 </div>
+
+                {/* OAuth Token Refresh Telemetry */}
+                {isOAuth && (
+                  <div className="mt-2 rounded-lg bg-slate-900/70 border border-slate-800/80 px-2.5 py-1.5 text-[10.5px] font-mono flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1 text-slate-400">
+                      <RefreshCw className="h-3 w-3 text-slate-500" />
+                      Token Refresh:
+                    </span>
+                    <span
+                      className={
+                        mb.lastTokenRefreshStatus === 'ok'
+                          ? 'text-emerald-400'
+                          : mb.lastTokenRefreshStatus === 'error'
+                          ? 'text-rose-400'
+                          : 'text-slate-400'
+                      }
+                      title={mb.lastTokenRefreshError || undefined}
+                    >
+                      {mb.lastTokenRefreshStatus === 'ok'
+                        ? mb.lastTokenRefreshAt
+                          ? `OK (${new Date(mb.lastTokenRefreshAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`
+                          : 'OK'
+                        : mb.lastTokenRefreshStatus === 'error'
+                        ? 'Failed (Re-auth needed)'
+                        : mb.lastTokenRefreshAt
+                        ? new Date(mb.lastTokenRefreshAt).toLocaleDateString()
+                        : 'Not refreshed yet'}
+                    </span>
+                  </div>
+                )}
 
                 {/* Quota Progress */}
                 <div className="mt-3 space-y-1.5">
@@ -308,7 +435,8 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
                       <div>
                         <p className="font-semibold text-rose-300">Re-authentication Required</p>
                         <p className="text-[11px] text-rose-200/80 leading-snug">
-                          OAuth access token expired or refresh token was revoked. Re-authenticate with Google to resume sending.
+                          {mb.lastError ||
+                            'OAuth access token expired or refresh token was revoked. Re-authenticate to resume sending.'}
                         </p>
                       </div>
                     </div>
@@ -388,7 +516,7 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
                     onClick={() => handleToggleStatus(mb)}
                     className="text-xs text-slate-400 hover:text-slate-200 cursor-pointer"
                   >
-                    {mb.status === 'connected' ? 'Pause' : 'Resume'}
+                    {mb.status === 'connected' ? 'Pause' : mb.status === 'reauth_required' ? 'Verify' : 'Resume'}
                   </button>
                   <button
                     onClick={() => setEditingMailbox(mb)}
@@ -481,14 +609,16 @@ const ConnectAccountModal: React.FC<{ onClose: () => void; onConnected: () => vo
   const [imapHost, setImapHost] = useState('');
   const [imapPort, setImapPort] = useState(993);
   const [oauthToken, setOauthToken] = useState('');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) return;
     setIsSubmitting(true);
+    setErrorMsg(null);
     try {
-      await fetch('/api/mailboxes', {
+      const res = await fetch('/api/mailboxes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -507,9 +637,14 @@ const ConnectAccountModal: React.FC<{ onClose: () => void; onConnected: () => vo
           oauth: oauthToken ? { accessToken: oauthToken } : undefined,
         }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        setErrorMsg(data.error || `Failed to connect mailbox (HTTP ${res.status})`);
+        return;
+      }
       onConnected();
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      setErrorMsg(e.message || 'Network error');
     } finally {
       setIsSubmitting(false);
     }
@@ -527,6 +662,13 @@ const ConnectAccountModal: React.FC<{ onClose: () => void; onConnected: () => vo
             <X className="h-4 w-4" />
           </button>
         </div>
+
+        {errorMsg && (
+          <div className="mt-3 p-2.5 rounded-lg bg-rose-950/50 border border-rose-700/60 text-rose-200 text-xs flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
 
         {/* Provider Tabs */}
         <div className="mt-4 grid grid-cols-3 gap-2">
@@ -556,7 +698,7 @@ const ConnectAccountModal: React.FC<{ onClose: () => void; onConnected: () => vo
             <input
               type="email"
               required
-              placeholder="azeem@apexoutbound.io"
+              placeholder="sender@company.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-1.5 text-slate-100 font-mono focus:border-blue-500 focus:outline-none"
@@ -568,7 +710,7 @@ const ConnectAccountModal: React.FC<{ onClose: () => void; onConnected: () => vo
               <label className="block text-slate-300 font-medium mb-1">Display Name</label>
               <input
                 type="text"
-                placeholder="Azeem Khawer"
+                placeholder="Sender Name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-1.5 text-slate-100 focus:border-blue-500 focus:outline-none"

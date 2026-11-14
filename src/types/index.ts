@@ -41,6 +41,7 @@ export interface LeadList {
   name: string;
   description: string;
   leadCount: number;
+  verifiedCount?: number;
   tags: string[];
   type: 'static' | 'segment';
   filterCriteria?: Record<string, any>;
@@ -201,6 +202,10 @@ export interface MailboxAccount {
   oauth?: MailboxOAuthConfig;
   lastError?: string;
   lastSyncAt: string;
+  syncStatus?: 'idle' | 'synchronizing' | 'completed' | 'error';
+  lastTokenRefreshAt?: string;
+  lastTokenRefreshStatus?: 'ok' | 'error' | 'never';
+  lastTokenRefreshError?: string;
   lastSentAt?: number;
   createdAt: string;
   updatedAt?: string;
@@ -510,4 +515,9 @@ export interface ZeroCostStatus {
     status: 'free_built_in' | 'optional_disabled' | 'optional_active';
     description: string;
   }[];
+  envFlags?: {
+    googleOAuthConfigured: boolean;
+    microsoftOAuthConfigured: boolean;
+    geminiConfigured: boolean;
+  };
 }

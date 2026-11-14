@@ -10,12 +10,17 @@ import {
   Bell,
 } from 'lucide-react';
 
+import { MailboxAccount } from '../types';
+import { isProductionMailboxConnected } from '../utils/analyticsStats';
+
 interface HeaderProps {
   onSearchChange: (query: string) => void;
   onRefreshData: () => void;
   onOpenSimulateModal: () => void;
   isWorkerRunning: boolean;
   onTriggerWorker: () => void;
+  mailboxes?: MailboxAccount[];
+  workerStatus?: { isRunning: boolean; sendingActive: boolean } | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -24,6 +29,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSimulateModal,
   isWorkerRunning,
   onTriggerWorker,
+  mailboxes = [],
+  workerStatus,
 }) => {
   const [searchValue, setSearchValue] = useState('');
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
@@ -57,6 +64,49 @@ export const Header: React.FC<HeaderProps> = ({
     }
   };
 
+  const connectedProdMailboxes = mailboxes.filter(isProductionMailboxConnected);
+  const reauthMailboxes = mailboxes.filter(
+    (m) => m.status === 'reauth_required' || m.status === 'error'
+  );
+  const avgHealth =
+    connectedProdMailboxes.length > 0
+      ? Math.round(
+          connectedProdMailboxes.reduce((sum, m) => sum + (m.healthScore || 0), 0) /
+            connectedProdMailboxes.length
+        )
+      : 0;
+
+  let badgeDotClass = 'bg-amber-400';
+  let badgeContent: React.ReactNode = (
+    <span className="text-[11px] font-medium">
+      Senders: <span className="font-mono text-amber-400 font-semibold">0 Production Connected</span>
+    </span>
+  );
+
+  if (reauthMailboxes.length > 0 && connectedProdMailboxes.length === 0) {
+    badgeDotClass = 'bg-rose-400';
+    badgeContent = (
+      <span className="text-[11px] font-medium">
+        Mailbox Auth:{' '}
+        <span className="font-mono text-rose-400 font-semibold">
+          {reauthMailboxes.length} Re-auth Required
+        </span>
+      </span>
+    );
+  } else if (connectedProdMailboxes.length > 0) {
+    badgeDotClass = workerStatus?.sendingActive ? 'bg-emerald-400' : 'bg-amber-400';
+    badgeContent = (
+      <span className="text-[11px] font-medium">
+        Health:{' '}
+        <span className="font-mono text-emerald-400 font-semibold tabular-nums">{avgHealth}%</span>
+        <span className="text-slate-400 ml-1 font-mono text-[10px]">
+          · {connectedProdMailboxes.length} Active ·{' '}
+          {workerStatus?.sendingActive ? 'Worker Running' : 'Worker Paused'}
+        </span>
+      </span>
+    );
+  }
+
   return (
     <header className="flex h-13 items-center justify-between border-b border-slate-800/80 bg-[#080d19]/80 px-6 backdrop-blur-md select-none shrink-0 z-10">
       {/* Search Input */}
@@ -86,16 +136,15 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         )}
 
-        {/* Deliverability Badge */}
+        {/* Live Sender & Worker Status Badge */}
         <div className="hidden sm:flex items-center gap-2 bg-slate-900/60 border border-slate-800 px-2.5 py-1 rounded-md text-xs text-slate-300">
           <span className="relative flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+            {workerStatus?.sendingActive && connectedProdMailboxes.length > 0 && (
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            )}
+            <span className={`relative inline-flex rounded-full h-2 w-2 ${badgeDotClass}`} />
           </span>
-          <span className="text-[11px] font-medium">
-            Deliverability: <span className="font-mono text-emerald-400 font-semibold tabular-nums">98%</span>
-            <span className="text-slate-500 ml-1 font-mono text-[10px]">· SPF/DKIM</span>
-          </span>
+          {badgeContent}
         </div>
 
         {/* Trigger Outbound Sending Worker */}

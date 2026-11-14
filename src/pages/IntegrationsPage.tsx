@@ -2,37 +2,33 @@ import React, { useState, useEffect } from 'react';
 import {
   Blocks,
   CheckCircle2,
-  AlertCircle,
-  ExternalLink,
   Search,
   UserPlus,
   ShieldCheck,
-  Zap,
   RotateCw,
-  Building,
   Mail,
-  Key,
   DollarSign,
   Database,
   Sparkles,
-  Server,
-  HardDrive,
-  Lock,
-  ArrowRight,
-  HelpCircle,
 } from 'lucide-react';
-import { ZeroCostStatus } from '../types';
+import { MailboxAccount, ZeroCostStatus } from '../types';
 
 interface IntegrationsPageProps {
+  mailboxes?: MailboxAccount[];
+  budgetStatus?: ZeroCostStatus | null;
   onRefreshAll: () => void;
 }
 
-export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll }) => {
+export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({
+  mailboxes = [],
+  budgetStatus: initialBudgetStatus = null,
+  onRefreshAll,
+}) => {
   const [activeTab, setActiveTab] = useState<'budget' | 'integrations' | 'lead_finder' | 'verifier'>('budget');
   const [configuredConnector, setConfiguredConnector] = useState<any | null>(null);
 
   // Budget status state
-  const [budgetStatus, setBudgetStatus] = useState<ZeroCostStatus | null>(null);
+  const [budgetStatus, setBudgetStatus] = useState<ZeroCostStatus | null>(initialBudgetStatus);
   const [loadingBudget, setLoadingBudget] = useState(false);
 
   // Lead finder state
@@ -63,8 +59,12 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
   };
 
   useEffect(() => {
-    fetchBudgetStatus();
-  }, []);
+    if (initialBudgetStatus) {
+      setBudgetStatus(initialBudgetStatus);
+    } else {
+      fetchBudgetStatus();
+    }
+  }, [initialBudgetStatus]);
 
   const handleSearchProspects = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,7 +88,7 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
 
   const handleImportProspect = async (p: any) => {
     try {
-      await fetch('/api/leads', {
+      const res = await fetch('/api/leads', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -101,9 +101,11 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
           source: 'Lead Finder Prospecting Tool',
         }),
       });
-      setImportedMessage(`Imported ${p.fullName} into Leads database!`);
-      onRefreshAll();
-      setTimeout(() => setImportedMessage(null), 3000);
+      if (res.ok) {
+        setImportedMessage(`Imported ${p.fullName} into Leads database!`);
+        onRefreshAll();
+        setTimeout(() => setImportedMessage(null), 3000);
+      }
     } catch (e) {
       console.error(e);
     }
@@ -121,8 +123,7 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
       });
       const data = await res.json();
       setVerificationResult(data);
-    } catch (err) {
-      // Fallback
+    } catch {
       const isFormatValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(testEmail);
       setVerificationResult({
         email: testEmail,
@@ -137,14 +138,54 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
     }
   };
 
+  // Real connection status computation
+  const gmailMailboxes = mailboxes.filter((m) => m.provider === 'gmail');
+  const connectedGmail = gmailMailboxes.filter((m) => m.status === 'connected');
+  const reauthGmail = gmailMailboxes.filter((m) => m.status === 'reauth_required' || m.status === 'error');
+  const googleConfigured = Boolean(budgetStatus?.envFlags?.googleOAuthConfigured);
+
+  const outlookMailboxes = mailboxes.filter((m) => m.provider === 'outlook');
+  const connectedOutlook = outlookMailboxes.filter((m) => m.status === 'connected');
+  const microsoftConfigured = Boolean(budgetStatus?.envFlags?.microsoftOAuthConfigured);
+
+  const smtpProdMailboxes = mailboxes.filter((m) => m.provider === 'smtp' && !m.isTestMailbox && m.status === 'connected');
+  const smtpTestMailboxes = mailboxes.filter((m) => m.isTestMailbox && m.status === 'connected');
+
+  const geminiConfigured =
+    budgetStatus?.envFlags?.geminiConfigured ??
+    (budgetStatus?.freeAiTier?.status === 'configured' || budgetStatus?.geminiFreeTierStatus === 'active');
+
   const connectors = [
     {
       id: 'google',
       name: 'Google Workspace / Gmail API',
       category: 'Free Built-In Email Dispatch',
       desc: 'Free OAuth 2.0 connection. Up to 500 (Personal) or 2,000 (Google Workspace) emails/day with $0 relay fees.',
-      status: 'Connected (OAuth 2.0 Active)',
-      connected: true,
+      status:
+        connectedGmail.length > 0
+          ? `Connected (${connectedGmail.length} account${connectedGmail.length > 1 ? 's' : ''})`
+          : reauthGmail.length > 0
+          ? `Re-auth Required (${reauthGmail.length} expired)`
+          : googleConfigured
+          ? 'OAuth Configured (No Mailbox Connected)'
+          : 'Not Configured (Set GOOGLE_CLIENT_ID)',
+      badgeLabel:
+        connectedGmail.length > 0
+          ? `Active (${connectedGmail.length})`
+          : reauthGmail.length > 0
+          ? 'Re-auth Required'
+          : googleConfigured
+          ? 'Ready'
+          : 'Not Configured',
+      badgeTone:
+        connectedGmail.length > 0
+          ? 'emerald'
+          : reauthGmail.length > 0
+          ? 'rose'
+          : googleConfigured
+          ? 'amber'
+          : 'slate',
+      connected: connectedGmail.length > 0,
       cost: '$0.00 / month',
     },
     {
@@ -152,8 +193,20 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
       name: 'Microsoft 365 / Graph API',
       category: 'Free Built-In Email Dispatch',
       desc: 'Azure AD / Microsoft Graph direct REST dispatch. Operates on your standard Microsoft account quota at $0.',
-      status: 'Supported (Token Auto-Refresh)',
-      connected: true,
+      status:
+        connectedOutlook.length > 0
+          ? `Connected (${connectedOutlook.length} account${connectedOutlook.length > 1 ? 's' : ''})`
+          : microsoftConfigured
+          ? 'Configured (No Mailbox Connected)'
+          : 'Not Configured',
+      badgeLabel:
+        connectedOutlook.length > 0
+          ? `Active (${connectedOutlook.length})`
+          : microsoftConfigured
+          ? 'Ready'
+          : 'Not Configured',
+      badgeTone: connectedOutlook.length > 0 ? 'emerald' : microsoftConfigured ? 'amber' : 'slate',
+      connected: connectedOutlook.length > 0,
       cost: '$0.00 / month',
     },
     {
@@ -161,16 +214,30 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
       name: 'Custom SMTP / IMAP Servers',
       category: 'Free Built-In Email Dispatch',
       desc: 'Connect custom domains, cPanel webmail, or Ethereal sandbox test mailboxes at $0 cost.',
-      status: 'Operational',
-      connected: true,
+      status:
+        smtpProdMailboxes.length > 0
+          ? `Connected (${smtpProdMailboxes.length} SMTP)`
+          : smtpTestMailboxes.length > 0
+          ? `Sandbox Only (${smtpTestMailboxes.length} Ethereal)`
+          : 'Ready (0 Connected)',
+      badgeLabel:
+        smtpProdMailboxes.length > 0
+          ? `Active (${smtpProdMailboxes.length})`
+          : smtpTestMailboxes.length > 0
+          ? 'Test Rig Only'
+          : 'Ready',
+      badgeTone: smtpProdMailboxes.length > 0 ? 'emerald' : smtpTestMailboxes.length > 0 ? 'amber' : 'slate',
+      connected: smtpProdMailboxes.length > 0,
       cost: '$0.00 / month',
     },
     {
       id: 'sqlite',
       name: 'Local SQLite ACID Engine',
       category: 'Free Built-In Database',
-      desc: 'Native node:sqlite in WAL mode with dual JSON persistence. Unlimited local storage at $0.',
-      status: 'Active (data/outboundos.sqlite)',
+      desc: 'Native better-sqlite3 in WAL mode with dual JSON persistence. Unlimited local storage at $0.',
+      status: `Active (${budgetStatus?.storage?.path || 'data/outboundos.sqlite'})`,
+      badgeLabel: 'Active ($0)',
+      badgeTone: 'emerald',
       connected: true,
       cost: '$0.00 / month',
     },
@@ -179,8 +246,10 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
       name: 'Google Gemini Free AI Tier',
       category: 'Free AI Intelligence',
       desc: '15 RPM / 1,500 RPD free tier for cold email sequence drafting and domain prospecting.',
-      status: 'Active (Free Tier)',
-      connected: true,
+      status: geminiConfigured ? 'Active (Free Tier Key Configured)' : 'Not Configured (Local Template Fallback)',
+      badgeLabel: geminiConfigured ? 'Active ($0)' : 'Fallback Only',
+      badgeTone: geminiConfigured ? 'emerald' : 'amber',
+      connected: geminiConfigured,
       cost: '$0.00 / month',
     },
     {
@@ -188,7 +257,9 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
       name: 'Local DNS MX Validator',
       category: 'Free Built-In Deliverability',
       desc: 'RFC 5322 syntax validation and Node.js native DNS MX records resolution with $0 paid API fees.',
-      status: 'Built-in',
+      status: 'Built-in Local DNS Resolver',
+      badgeLabel: 'Active ($0)',
+      badgeTone: 'emerald',
       connected: true,
       cost: '$0.00 / month',
     },
@@ -198,6 +269,8 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
       category: 'Optional External Service',
       desc: 'Optional third-party enrichment API. OutboundOS works completely without it at $0 cost.',
       status: 'Optional (Disabled / Not Required)',
+      badgeLabel: 'Optional',
+      badgeTone: 'slate',
       connected: false,
       cost: 'Optional (Saved $39/mo)',
     },
@@ -207,6 +280,8 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
       category: 'Optional External Service',
       desc: 'Optional external CRM synchronization. OutboundOS stores all Deals, Companies, and Tasks in local SQLite.',
       status: 'Optional (Disabled / Not Required)',
+      badgeLabel: 'Optional',
+      badgeTone: 'slate',
       connected: false,
       cost: 'Optional (Saved $50/mo)',
     },
@@ -216,10 +291,25 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
       category: 'Optional External Service',
       desc: 'Paid verification services are fully replaced by the built-in local DNS MX engine.',
       status: 'Optional (Disabled / Not Required)',
+      badgeLabel: 'Optional',
+      badgeTone: 'slate',
       connected: false,
       cost: 'Optional (Saved $25/mo)',
     },
   ];
+
+  const toneClasses = (tone: string) => {
+    switch (tone) {
+      case 'emerald':
+        return 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30';
+      case 'rose':
+        return 'bg-rose-500/15 text-rose-300 border border-rose-500/40';
+      case 'amber':
+        return 'bg-amber-500/15 text-amber-300 border border-amber-500/30';
+      default:
+        return 'bg-slate-800 text-slate-400 border border-slate-700';
+    }
+  };
 
   return (
     <div className="flex-1 overflow-y-auto bg-[#070b14] text-slate-100 p-6 space-y-6 custom-scrollbar">
@@ -235,7 +325,7 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
-            Operating budget, local SQLite persistence, free email dispatch adapters, and deliverability tools.
+            Operating budget, local SQLite persistence, live adapter connection checks, and deliverability tools.
           </p>
         </div>
 
@@ -296,7 +386,7 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
                 </h2>
                 <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
                   OutboundOS operates with an absolute budget of $0.00. No subscriptions, no paid APIs, no credit cards,
-                  no paid cloud databases, and no hosting fees. All data is persisted in a local ACID SQLite database,
+                  no paid cloud databases, and no hosting fees. All data is persisted in local SQLite,
                   email sending utilizes free provider quotas (Gmail API & Microsoft Graph), and AI runs on Google's free tier.
                 </p>
               </div>
@@ -336,8 +426,8 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
                 </span>
               </div>
               <p className="text-xs text-slate-400 leading-relaxed">
-                Native Node.js <code className="text-slate-300 font-mono">node:sqlite</code> database with Write-Ahead Logging
-                and dual-persistence mirroring. No cloud database fees or network latency.
+                Local <code className="text-slate-300 font-mono">better-sqlite3</code> database with Write-Ahead Logging
+                and JSON persistence mirroring. No cloud database fees or network latency.
               </p>
               <div className="pt-2 border-t border-slate-800/80 space-y-1 text-[11px] font-mono text-slate-400">
                 <div className="flex justify-between">
@@ -368,7 +458,7 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
                   </div>
                 </div>
                 <span className="rounded-full bg-blue-500/15 text-blue-400 px-2 py-0.5 text-[10px] font-bold">
-                  OAuth 2.0
+                  {connectedGmail.length + connectedOutlook.length + smtpProdMailboxes.length} Connected
                 </span>
               </div>
               <p className="text-xs text-slate-400 leading-relaxed">
@@ -403,18 +493,24 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
                     <span className="text-[10px] text-emerald-400 font-mono font-medium">$0.00 AI Cost</span>
                   </div>
                 </div>
-                <span className="rounded-full bg-purple-500/15 text-purple-400 px-2 py-0.5 text-[10px] font-bold">
-                  gemini-2.5-flash
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                    geminiConfigured ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-300'
+                  }`}
+                >
+                  {geminiConfigured ? 'gemini-2.5-flash' : 'Fallback Mode'}
                 </span>
               </div>
               <p className="text-xs text-slate-400 leading-relaxed">
                 Generates multi-step cold outreach sequences, improves subject lines, and classifies inbound replies
-                using the free Google AI Studio Gemini API tier.
+                using the free Google AI Studio Gemini API tier when configured.
               </p>
               <div className="pt-2 border-t border-slate-800/80 space-y-1 text-[11px] font-mono text-slate-400">
                 <div className="flex justify-between">
-                  <span>Rate Limit:</span>
-                  <span className="text-slate-200">15 RPM / 1M TPM free</span>
+                  <span>API Key Status:</span>
+                  <span className={geminiConfigured ? 'text-emerald-400' : 'text-amber-300'}>
+                    {geminiConfigured ? 'Configured' : 'Not Set (Safe Fallback)'}
+                  </span>
                 </div>
                 <div className="flex justify-between">
                   <span>Daily Quota:</span>
@@ -428,7 +524,7 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
             </div>
           </div>
 
-          {/* Breakdown Table: Zero Cost vs Paid Alternatives */}
+          {/* Breakdown Table */}
           <div className="rounded-xl border border-slate-800 bg-[#080d19] p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div>
@@ -459,7 +555,7 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
                 <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
                   <tr>
                     <td className="py-2.5 font-bold text-slate-200">Database Engine</td>
-                    <td className="py-2.5 text-slate-300">Native SQLite (node:sqlite ACID WAL)</td>
+                    <td className="py-2.5 text-slate-300">Local SQLite (better-sqlite3 ACID WAL)</td>
                     <td className="py-2.5 text-emerald-400 font-bold">$0.00</td>
                     <td className="py-2.5 text-slate-400">AWS RDS PostgreSQL / Neon Cloud</td>
                     <td className="py-2.5 text-emerald-400 text-right font-bold">$25 - $200/mo</td>
@@ -523,24 +619,19 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
                 className="surface-card surface-card-hover rounded-xl p-5 flex flex-col justify-between transition-all duration-150 space-y-3"
               >
                 <div>
-                  <div className="flex items-start justify-between">
+                  <div className="flex items-start justify-between gap-2">
                     <div>
                       <span className="text-[10px] text-blue-400 font-mono uppercase tracking-wider block font-semibold">
                         {c.category}
                       </span>
                       <h3 className="text-sm font-semibold text-white mt-0.5">{c.name}</h3>
                     </div>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                        c.connected
-                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                          : 'bg-slate-800 text-slate-400 border border-slate-700'
-                      }`}
-                    >
-                      {c.connected ? 'Active ($0)' : 'Optional'}
+                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 ${toneClasses(c.badgeTone)}`}>
+                      {c.badgeLabel}
                     </span>
                   </div>
                   <p className="mt-2 text-xs text-slate-400 leading-relaxed">{c.desc}</p>
+                  <p className="mt-2 text-[11px] font-mono text-slate-300">{c.status}</p>
                 </div>
 
                 <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
@@ -567,7 +658,7 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
               Company Domain Lead Prospector
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
-              Discover verified executive emails and decision-makers by corporate domain. Operates without paid Apollo or Snov.io subscriptions.
+              Discover executive decision-makers by corporate domain. Operates without paid Apollo or Snov.io subscriptions.
             </p>
           </div>
 
@@ -611,11 +702,10 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
             </div>
           )}
 
-          {/* Prospects Results */}
           {prospects.length > 0 && (
             <div className="space-y-3">
               <h4 className="text-xs font-semibold text-slate-300">
-                Found {prospects.length} Verified Prospects for {searchDomain}
+                Found {prospects.length} Prospects for {searchDomain}
               </h4>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {prospects.map((p, idx) => (
@@ -763,14 +853,8 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
                 </span>
                 <h3 className="text-base font-bold text-white mt-0.5">{configuredConnector.name}</h3>
               </div>
-              <span
-                className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
-                  configuredConnector.connected
-                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                    : 'bg-slate-800 text-slate-400'
-                }`}
-              >
-                {configuredConnector.connected ? 'Operational' : 'Optional'}
+              <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${toneClasses(configuredConnector.badgeTone)}`}>
+                {configuredConnector.badgeLabel}
               </span>
             </div>
 
@@ -779,7 +863,7 @@ export const IntegrationsPage: React.FC<IntegrationsPageProps> = ({ onRefreshAll
             <div className="rounded-xl bg-slate-900/90 border border-slate-800 p-4 space-y-3 text-xs">
               <div className="flex items-center justify-between">
                 <span className="text-slate-400">Connection State:</span>
-                <span className="font-mono text-emerald-400 font-semibold">{configuredConnector.status}</span>
+                <span className="font-mono text-slate-200 font-semibold">{configuredConnector.status}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-slate-400">Operating Cost:</span>

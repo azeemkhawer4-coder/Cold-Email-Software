@@ -6,22 +6,30 @@ import {
   XCircle,
   FileSearch,
   Sparkles,
-  ArrowRight,
   Server,
-  KeyRound,
-  FileCheck2,
   RefreshCw,
   Layers,
   AlertOctagon,
   ExternalLink,
-  Play,
   X,
   RotateCw,
+  Eye,
+  Copy,
+  Check,
+  Power,
 } from 'lucide-react';
-import { SendingJob, FailureReport, QueueStats } from '../types';
+import { Campaign, SendingJob, FailureReport, QueueStats } from '../types';
 import { SafetyControlBar } from '../components/campaigns/SafetyControlBar';
 
-export const DeliverabilityPage: React.FC = () => {
+interface DeliverabilityPageProps {
+  campaigns?: Campaign[];
+  onRefreshAll?: () => void;
+}
+
+export const DeliverabilityPage: React.FC<DeliverabilityPageProps> = ({
+  campaigns = [],
+  onRefreshAll,
+}) => {
   const [activeTab, setActiveTab] = useState<'dns' | 'queue' | 'failures'>('queue');
   const [dnsDomain, setDnsDomain] = useState('');
   const [dnsResult, setDnsResult] = useState<any>(null);
@@ -34,6 +42,18 @@ export const DeliverabilityPage: React.FC = () => {
   );
   const [scanResult, setScanResult] = useState<any>(null);
   const [isScanning, setIsScanning] = useState(false);
+
+  // Worker & Queue State
+  const [workerStatus, setWorkerStatus] = useState<{ isRunning: boolean; sendingActive: boolean } | null>(null);
+  const [queueJobs, setQueueJobs] = useState<SendingJob[]>([]);
+  const [queueStats, setQueueStats] = useState<QueueStats | null>(null);
+  const [failures, setFailures] = useState<FailureReport[]>([]);
+  const [isLoadingQueue, setIsLoadingQueue] = useState(false);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [selectedJob, setSelectedJob] = useState<SendingJob | null>(null);
+  const [copiedIdempotency, setCopiedIdempotency] = useState(false);
+  const [isResumingWorker, setIsResumingWorker] = useState(false);
 
   const handleCheckDns = async (customDomain?: string) => {
     const target = (customDomain || dnsDomain || '').trim();
@@ -59,27 +79,29 @@ export const DeliverabilityPage: React.FC = () => {
     }
   };
 
-  // Durable Queue & Failures State
-  const [queueJobs, setQueueJobs] = useState<SendingJob[]>([]);
-  const [queueStats, setQueueStats] = useState<QueueStats | null>(null);
-  const [failures, setFailures] = useState<FailureReport[]>([]);
-  const [isLoadingQueue, setIsLoadingQueue] = useState(false);
-  const [retryingId, setRetryingId] = useState<string | null>(null);
-
   const fetchQueueAndFailures = async () => {
     setIsLoadingQueue(true);
     try {
-      const [qRes, fRes] = await Promise.all([
+      const [qRes, fRes, wRes] = await Promise.all([
         fetch('/api/queue'),
         fetch('/api/failures'),
+        fetch('/api/worker/status'),
       ]);
-      const qData = await qRes.json();
-      const fData = await fRes.json();
-      setQueueJobs(qData.jobs || []);
-      setQueueStats(qData.stats || null);
-      setFailures(fData.failureReports || []);
-    } catch (e) {
-      console.error(e);
+      if (qRes.ok) {
+        const qData = await qRes.json();
+        setQueueJobs(qData.jobs || []);
+        setQueueStats(qData.stats || null);
+      }
+      if (fRes.ok) {
+        const fData = await fRes.json();
+        setFailures(fData.failureReports || []);
+      }
+      if (wRes.ok) {
+        const wData = await wRes.json();
+        setWorkerStatus({ isRunning: Boolean(wData.isRunning), sendingActive: Boolean(wData.sendingActive) });
+      }
+    } catch (e: any) {
+      setActionError(e?.message || 'Failed to load queue state');
     } finally {
       setIsLoadingQueue(false);
     }
@@ -91,29 +113,55 @@ export const DeliverabilityPage: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
+  const handleResumeWorker = async () => {
+    setIsResumingWorker(true);
+    setActionError(null);
+    try {
+      const res = await fetch('/api/worker/toggle', { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to resume worker');
+      setWorkerStatus({ isRunning: true, sendingActive: Boolean(data.sendingActive) });
+      await fetchQueueAndFailures();
+      onRefreshAll?.();
+    } catch (e: any) {
+      setActionError(e?.message || 'Failed to resume worker');
+    } finally {
+      setIsResumingWorker(false);
+    }
+  };
+
   const handleRetryJob = async (jobId: string) => {
     setRetryingId(jobId);
+    setActionError(null);
     try {
-      await fetch(`/api/queue/${jobId}/retry`, { method: 'POST' });
+      const res = await fetch(`/api/queue/${jobId}/retry`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to retry job');
       await fetchQueueAndFailures();
-    } catch (e) {
-      console.error(e);
+      onRefreshAll?.();
+    } catch (e: any) {
+      setActionError(e?.message || 'Failed to retry job');
     } finally {
       setRetryingId(null);
     }
   };
 
   const handleCancelJob = async (jobId: string) => {
+    setActionError(null);
     try {
-      await fetch(`/api/queue/${jobId}`, { method: 'DELETE' });
+      const res = await fetch(`/api/queue/${jobId}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to cancel job');
       await fetchQueueAndFailures();
-    } catch (e) {
-      console.error(e);
+      onRefreshAll?.();
+    } catch (e: any) {
+      setActionError(e?.message || 'Failed to cancel job');
     }
   };
 
   const handleScanContent = async () => {
     setIsScanning(true);
+    setActionError(null);
     try {
       const res = await fetch('/api/deliverability/check-content', {
         method: 'POST',
@@ -121,13 +169,17 @@ export const DeliverabilityPage: React.FC = () => {
         body: JSON.stringify({ subject: subjectText, body: bodyText }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Content scan failed');
       setScanResult(data);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      setActionError(e?.message || 'Content scan failed');
     } finally {
       setIsScanning(false);
     }
   };
+
+  const hasActiveCampaignsWithPausedWorker =
+    campaigns.some((c) => c.status === 'active') && workerStatus !== null && !workerStatus.sendingActive;
 
   return (
     <div className="flex-1 overflow-y-auto bg-[#070b14] text-slate-100 p-6 space-y-6 custom-scrollbar">
@@ -191,7 +243,7 @@ export const DeliverabilityPage: React.FC = () => {
 
           <button
             onClick={fetchQueueAndFailures}
-            className="p-1.5 text-slate-400 hover:text-white transition rounded-lg hover:bg-slate-800"
+            className="p-1.5 text-slate-400 hover:text-white transition rounded-lg hover:bg-slate-800 cursor-pointer"
             title="Refresh queue state"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${isLoadingQueue ? 'animate-spin text-blue-400' : ''}`} />
@@ -200,7 +252,45 @@ export const DeliverabilityPage: React.FC = () => {
       </div>
 
       {/* Safety & Worker Control Bar */}
-      <SafetyControlBar onRefresh={fetchQueueAndFailures} />
+      <SafetyControlBar
+        onRefresh={() => {
+          fetchQueueAndFailures();
+          onRefreshAll?.();
+        }}
+        onStatusChange={setWorkerStatus}
+      />
+
+      {/* Warning banner when active campaigns exist while Worker Dispatch is paused */}
+      {hasActiveCampaignsWithPausedWorker && (
+        <div className="rounded-xl bg-amber-950/35 border border-amber-500/40 p-3.5 px-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-amber-200">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-white">Active campaigns are waiting while Worker Dispatch is Paused</p>
+              <p className="text-[11px] text-amber-200/80 mt-0.5">
+                Queued dispatches will remain paused until you resume the background dispatch loop.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleResumeWorker}
+            disabled={isResumingWorker}
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold transition cursor-pointer shrink-0 disabled:opacity-50"
+          >
+            <Power className="h-3.5 w-3.5" />
+            <span>{isResumingWorker ? 'Resuming...' : 'Resume Worker'}</span>
+          </button>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="rounded-xl bg-rose-500/15 border border-rose-500/30 p-3 text-xs text-rose-300 flex items-center justify-between">
+          <span>{actionError}</span>
+          <button onClick={() => setActionError(null)} className="text-rose-400 hover:text-white cursor-pointer">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* TAB 1: OUTBOX QUEUE */}
       {activeTab === 'queue' && (
@@ -231,7 +321,20 @@ export const DeliverabilityPage: React.FC = () => {
                 <h3 className="text-sm font-semibold text-white tracking-tight">Durable Outbox Queue</h3>
                 <p className="text-[11px] text-slate-400">Scheduled sequence jobs with idempotency keys and retry attempts</p>
               </div>
-              <span className="text-[11px] font-mono text-slate-500">Autonomous Server Worker Active</span>
+              <span
+                className={`inline-flex items-center gap-1.5 rounded border px-2.5 py-0.5 text-[11px] font-mono ${
+                  workerStatus?.sendingActive
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                    : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                }`}
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    workerStatus?.sendingActive ? 'bg-emerald-400' : 'bg-amber-400'
+                  }`}
+                />
+                {workerStatus?.sendingActive ? 'Worker Dispatch: Running' : 'Worker Dispatch: Paused'}
+              </span>
             </div>
 
             {queueJobs.length === 0 ? (
@@ -260,7 +363,6 @@ export const DeliverabilityPage: React.FC = () => {
                           <td className="px-4 py-3">
                             <span className="font-semibold text-white block">{job.leadName || 'Prospect'}</span>
                             <span className="text-[11px] text-slate-400 font-mono block">{job.leadEmail}</span>
-                            <span className="text-[9px] text-slate-500 font-mono block truncate max-w-xs">{job.idempotencyKey}</span>
                           </td>
                           <td className="px-4 py-3 text-slate-300 max-w-xs truncate" title={job.subject}>
                             {job.subject}
@@ -322,6 +424,17 @@ export const DeliverabilityPage: React.FC = () => {
                           </td>
                           <td className="px-4 py-3 text-right">
                             <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => {
+                                  setCopiedIdempotency(false);
+                                  setSelectedJob(job);
+                                }}
+                                className="flex items-center gap-1 rounded bg-slate-800 px-2 py-1 text-[11px] text-slate-300 hover:text-white hover:bg-slate-700 cursor-pointer"
+                                title="Inspect job details & idempotency key"
+                              >
+                                <Eye className="h-3 w-3" />
+                                <span>Details</span>
+                              </button>
                               {(job.status === 'failed' || job.status === 'retrying') && (
                                 <button
                                   onClick={() => handleRetryJob(job.id)}
@@ -653,6 +766,97 @@ export const DeliverabilityPage: React.FC = () => {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* JOB DETAILS MODAL */}
+      {selectedJob && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="surface-card rounded-2xl border border-slate-700 p-6 max-w-lg w-full space-y-4 shadow-2xl text-slate-100 max-h-[85vh] overflow-y-auto custom-scrollbar">
+            <div className="flex items-start justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white">Sending Job Payload & Diagnostics</h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Recipient: <span className="font-mono text-slate-200">{selectedJob.leadEmail}</span>
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedJob(null)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="rounded-lg bg-slate-900 border border-slate-800 p-2.5">
+                <span className="text-[10px] font-mono uppercase text-slate-500 block">Status</span>
+                <span className="font-mono font-semibold text-slate-200 uppercase">{selectedJob.status}</span>
+              </div>
+              <div className="rounded-lg bg-slate-900 border border-slate-800 p-2.5">
+                <span className="text-[10px] font-mono uppercase text-slate-500 block">Attempts</span>
+                <span className="font-mono font-semibold text-slate-200">
+                  {selectedJob.attempts} / {selectedJob.maxAttempts}
+                </span>
+              </div>
+              <div className="rounded-lg bg-slate-900 border border-slate-800 p-2.5">
+                <span className="text-[10px] font-mono uppercase text-slate-500 block">Mailbox</span>
+                <span className="font-mono text-slate-200 truncate block">
+                  {selectedJob.mailboxEmail || 'Load Balanced'}
+                </span>
+              </div>
+              <div className="rounded-lg bg-slate-900 border border-slate-800 p-2.5">
+                <span className="text-[10px] font-mono uppercase text-slate-500 block">Scheduled At</span>
+                <span className="font-mono text-slate-200">
+                  {new Date(selectedJob.scheduledAt).toLocaleString()}
+                </span>
+              </div>
+            </div>
+
+            <div className="rounded-lg bg-slate-950 border border-slate-800 p-3 space-y-1.5 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono uppercase text-slate-500">Idempotency Key</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(selectedJob.idempotencyKey || '');
+                    setCopiedIdempotency(true);
+                    setTimeout(() => setCopiedIdempotency(false), 2000);
+                  }}
+                  className="flex items-center gap-1 text-[10px] font-mono text-blue-400 hover:text-blue-300 cursor-pointer"
+                >
+                  {copiedIdempotency ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                  <span>{copiedIdempotency ? 'Copied' : 'Copy Key'}</span>
+                </button>
+              </div>
+              <p className="font-mono text-[11px] text-slate-300 break-all">{selectedJob.idempotencyKey}</p>
+            </div>
+
+            {selectedJob.lastError && (
+              <div className="rounded-lg bg-rose-950/30 border border-rose-500/30 p-3 space-y-1 text-xs">
+                <span className="text-[10px] font-mono uppercase text-rose-400 block">Last Error</span>
+                <p className="font-mono text-rose-200 break-words">{selectedJob.lastError}</p>
+              </div>
+            )}
+
+            <div className="rounded-lg bg-slate-950 border border-slate-800 p-3 space-y-1.5 text-xs">
+              <span className="text-[10px] font-mono uppercase text-slate-500 block">Rendered Message</span>
+              <p className="font-semibold text-white">{selectedJob.subject}</p>
+              <p className="font-mono text-[11px] text-slate-300 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto custom-scrollbar">
+                {selectedJob.body}
+              </p>
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setSelectedJob(null)}
+                className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 cursor-pointer"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

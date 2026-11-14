@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sparkles,
   Send,
@@ -8,27 +8,51 @@ import {
   Check,
   RotateCw,
   Lightbulb,
-  FileText,
-  Target,
-  ShieldCheck,
+  AlertCircle,
 } from 'lucide-react';
+import { ZeroCostStatus } from '../types';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
 }
 
-export const AiAssistantPage: React.FC = () => {
+interface AiAssistantPageProps {
+  budgetStatus?: ZeroCostStatus | null;
+}
+
+export const AiAssistantPage: React.FC<AiAssistantPageProps> = ({ budgetStatus }) => {
+  const [localBudgetStatus, setLocalBudgetStatus] = useState<ZeroCostStatus | null>(budgetStatus || null);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
       content:
-        "Hello! I am your OutboundOS AI Outreach Strategist. I have full context of your connected sending accounts, active enterprise campaigns, and deliverability reputation.\n\nHow can I help you accelerate conversions today? You can ask me to write a custom multi-step cold sequence, improve your subject line open rates, troubleshoot deliverability, or triage inbound objection patterns.",
+        "Hello! I am your OutboundOS AI Outreach Strategist. I have context of your local workspace, connected sending accounts, campaigns, and deliverability status.\n\nHow can I help you today? Ask me to write a custom multi-step cold sequence, improve your subject lines, troubleshoot deliverability, or triage inbound replies.",
     },
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (budgetStatus) {
+      setLocalBudgetStatus(budgetStatus);
+      return;
+    }
+    fetch('/api/budget/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data) setLocalBudgetStatus(data);
+      })
+      .catch(() => {});
+  }, [budgetStatus]);
+
+  const effectiveStatus = budgetStatus || localBudgetStatus;
+  const geminiConfigured =
+    effectiveStatus?.envFlags?.geminiConfigured ??
+    (effectiveStatus?.freeAiTier?.status === 'configured' ||
+      effectiveStatus?.geminiFreeTierStatus === 'active');
+  const modelName = effectiveStatus?.freeAiTier?.model || 'gemini-2.5-flash';
 
   const presets = [
     'Write a 3-step sequence for Enterprise VP Engineering with personalized Kubernetes hooks',
@@ -89,20 +113,35 @@ export const AiAssistantPage: React.FC = () => {
   return (
     <div className="flex-1 flex flex-col overflow-hidden bg-[#070b14] text-slate-100 p-6 space-y-4">
       {/* Top Header */}
-      <div className="flex items-center justify-between pb-3 border-b border-slate-800/80">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800/80">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-indigo-400" />
             Gemini AI Outreach Copilot
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            Context-aware AI strategist trained on high-converting B2B cold email copy, deliverability, and objection handling.
+            Context-aware strategist for B2B cold email copy, deliverability troubleshooting, and objection handling.
           </p>
         </div>
-        <span className="rounded bg-slate-900 text-indigo-400 text-xs font-mono px-2.5 py-1 border border-slate-800 font-medium">
-          gemini-3.8-flash Active
+        <span
+          className={`rounded text-xs font-mono px-2.5 py-1 border font-medium ${
+            geminiConfigured
+              ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+              : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+          }`}
+        >
+          {geminiConfigured ? `${modelName} · Active` : `${modelName} · Local Fallback (No Key)`}
         </span>
       </div>
+
+      {!geminiConfigured && effectiveStatus && (
+        <div className="rounded-lg bg-amber-950/30 border border-amber-700/40 px-3.5 py-2 text-xs text-amber-200 flex items-center gap-2">
+          <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />
+          <span>
+            <code>GEMINI_API_KEY</code> is not configured in the local environment. Responses currently use built-in deterministic $0 local templates.
+          </span>
+        </div>
+      )}
 
       {/* Suggested Quick Prompts */}
       <div className="flex flex-wrap gap-2">
@@ -145,7 +184,7 @@ export const AiAssistantPage: React.FC = () => {
               {m.role === 'assistant' && (
                 <button
                   onClick={() => handleCopy(m.content, idx)}
-                  className="absolute top-2 right-2 p-1 rounded bg-slate-800 text-slate-400 hover:text-white opacity-0 group-hover:opacity-100 transition"
+                  className="absolute top-2 right-2 p-1 rounded bg-slate-800 text-slate-400 hover:text-white opacity-0 group-hover:opacity-100 transition cursor-pointer"
                   title="Copy response"
                 >
                   {copiedIdx === idx ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}

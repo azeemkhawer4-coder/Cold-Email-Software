@@ -1,15 +1,7 @@
 import React from 'react';
 import {
-  BarChart3,
-  TrendingUp,
   Download,
-  Send,
-  CheckCircle2,
-  MessageSquare,
-  AlertOctagon,
-  CalendarCheck,
   Split,
-  Mail,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -21,39 +13,62 @@ import {
   CartesianGrid,
   Legend,
 } from 'recharts';
-import { Campaign, MailboxAccount } from '../types';
+import { Campaign, Conversation, Deal, Lead, MailboxAccount, SendingJob } from '../types';
+import { computeAnalyticsSummary } from '../utils/analyticsStats';
 
 interface AnalyticsPageProps {
   campaigns: Campaign[];
   mailboxes: MailboxAccount[];
+  leads?: Lead[];
+  conversations?: Conversation[];
+  sendingJobs?: SendingJob[];
+  deals?: Deal[];
 }
 
-export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ campaigns, mailboxes }) => {
-  const totalSent = campaigns.reduce((acc, c) => acc + c.stats.sent, 0);
-  const totalDelivered = campaigns.reduce((acc, c) => acc + c.stats.delivered, 0);
-  const totalReplies = campaigns.reduce((acc, c) => acc + c.stats.replied, 0);
-  const positiveReplies = campaigns.reduce((acc, c) => acc + c.stats.positiveReplies, 0);
-  const totalMeetings = campaigns.reduce((acc, c) => acc + c.stats.meetingsBooked, 0);
-  const totalBounced = campaigns.reduce((acc, c) => acc + c.stats.bounced, 0);
+export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
+  campaigns,
+  mailboxes,
+  leads = [],
+  conversations = [],
+  sendingJobs = [],
+  deals = [],
+}) => {
+  const summary = computeAnalyticsSummary({
+    leads,
+    campaigns,
+    mailboxes,
+    conversations,
+    sendingJobs,
+    deals,
+  });
 
   const mailboxBarData = mailboxes.map((mb) => ({
     name: mb.email.split('@')[0],
-    sentToday: mb.sentToday,
-    dailyLimit: mb.dailyLimit,
-    health: mb.healthScore,
+    sentToday: mb.sentToday || 0,
+    dailyLimit: mb.dailyLimit || 0,
+    health: mb.healthScore || 0,
   }));
 
   const handleExportAnalytics = () => {
-    const headers = ['Campaign Name', 'Status', 'Sent', 'Delivered', 'Replies', 'Positive Replies', 'Meetings Booked', 'Bounces'];
+    const headers = [
+      'Campaign Name',
+      'Status',
+      'Sent',
+      'Delivered',
+      'Replies',
+      'Positive Replies',
+      'Meetings Booked',
+      'Bounces',
+    ];
     const rows = campaigns.map((c) => [
-      `"${c.name}"`,
+      `"${(c.name || '').replace(/"/g, '""')}"`,
       c.status,
-      c.stats.sent,
-      c.stats.delivered,
-      c.stats.replied,
-      c.stats.positiveReplies,
-      c.stats.meetingsBooked,
-      c.stats.bounced,
+      c.stats?.sent || 0,
+      c.stats?.delivered || 0,
+      c.stats?.replied || 0,
+      c.stats?.positiveReplies || 0,
+      c.stats?.meetingsBooked || 0,
+      c.stats?.bounced || 0,
     ]);
     const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -62,6 +77,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ campaigns, mailbox
     a.href = url;
     a.download = `outboundos-analytics-${Date.now()}.csv`;
     a.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
@@ -73,7 +89,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ campaigns, mailbox
             Advanced Analytics & Conversion Reporting
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            Audit sending acceptance, reply velocity, variant A/B winners, and mailbox health performance.
+            Live SQLite metrics for sending acceptance, reply velocity, variant A/B performance, and mailbox allocation.
           </p>
         </div>
 
@@ -90,44 +106,65 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ campaigns, mailbox
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3.5">
         <div className="surface-card surface-card-hover rounded-xl p-4 transition-all duration-150">
           <span className="text-xs text-slate-400 block font-medium">Total Sent</span>
-          <span className="text-2xl font-bold text-white mt-1 block font-mono tabular-nums">{totalSent}</span>
-          <span className="text-[10px] text-cyan-400 block mt-1 font-mono">{totalDelivered} accepted</span>
+          <span className="text-2xl font-bold text-white mt-1 block font-mono tabular-nums">
+            {summary.totalSent}
+          </span>
+          <span className="text-[10px] text-cyan-400 block mt-1 font-mono">
+            {summary.totalDelivered} accepted
+          </span>
         </div>
 
         <div className="surface-card surface-card-hover rounded-xl p-4 transition-all duration-150">
           <span className="text-xs text-slate-400 block font-medium">Total Replies</span>
-          <span className="text-2xl font-bold text-indigo-400 mt-1 block font-mono tabular-nums">{totalReplies}</span>
+          <span className="text-2xl font-bold text-indigo-400 mt-1 block font-mono tabular-nums">
+            {summary.totalReplies}
+          </span>
           <span className="text-[10px] text-slate-400 block mt-1 font-mono">
-            {totalDelivered > 0 ? ((totalReplies / totalDelivered) * 100).toFixed(1) : 0}% reply rate
+            {summary.replyRate.toFixed(1)}% reply rate
           </span>
         </div>
 
         <div className="surface-card surface-card-hover rounded-xl p-4 transition-all duration-150">
           <span className="text-xs text-slate-400 block font-medium">Positive Replies</span>
-          <span className="text-2xl font-bold text-emerald-400 mt-1 block font-mono tabular-nums">{positiveReplies}</span>
+          <span className="text-2xl font-bold text-emerald-400 mt-1 block font-mono tabular-nums">
+            {summary.positiveReplies}
+          </span>
           <span className="text-[10px] text-emerald-400/80 block mt-1 font-mono">
-            {totalReplies > 0 ? Math.round((positiveReplies / totalReplies) * 100) : 0}% intent ratio
+            {summary.totalReplies > 0
+              ? Math.round((summary.positiveReplies / summary.totalReplies) * 100)
+              : 0}
+            % intent ratio
           </span>
         </div>
 
         <div className="surface-card surface-card-hover rounded-xl p-4 transition-all duration-150">
           <span className="text-xs text-slate-400 block font-medium">Meetings Booked</span>
-          <span className="text-2xl font-bold text-amber-400 mt-1 block font-mono tabular-nums">{totalMeetings}</span>
-          <span className="text-[10px] text-slate-400 block mt-1">Confirmed demo pipeline</span>
-        </div>
-
-        <div className="surface-card surface-card-hover rounded-xl p-4 transition-all duration-150">
-          <span className="text-xs text-slate-400 block font-medium">Hard Bounces</span>
-          <span className="text-2xl font-bold text-rose-400 mt-1 block font-mono tabular-nums">{totalBounced}</span>
-          <span className="text-[10px] text-slate-400 block mt-1 font-mono">
-            {totalSent > 0 ? ((totalBounced / totalSent) * 100).toFixed(1) : 0}% bounce rate
+          <span className="text-2xl font-bold text-amber-400 mt-1 block font-mono tabular-nums">
+            {summary.totalMeetings}
+          </span>
+          <span className="text-[10px] text-slate-400 block mt-1">
+            {summary.openDealsCount} open CRM deal(s)
           </span>
         </div>
 
         <div className="surface-card surface-card-hover rounded-xl p-4 transition-all duration-150">
-          <span className="text-xs text-slate-400 block font-medium">Sending Accounts</span>
-          <span className="text-2xl font-bold text-blue-400 mt-1 block font-mono tabular-nums">{mailboxes.length}</span>
-          <span className="text-[10px] text-emerald-400 block mt-1">All balanced</span>
+          <span className="text-xs text-slate-400 block font-medium">Hard Bounces</span>
+          <span className="text-2xl font-bold text-rose-400 mt-1 block font-mono tabular-nums">
+            {summary.totalBounced}
+          </span>
+          <span className="text-[10px] text-slate-400 block mt-1 font-mono">
+            {summary.bounceRate.toFixed(1)}% bounce rate
+          </span>
+        </div>
+
+        <div className="surface-card surface-card-hover rounded-xl p-4 transition-all duration-150">
+          <span className="text-xs text-slate-400 block font-medium">Prod Senders</span>
+          <span className="text-2xl font-bold text-blue-400 mt-1 block font-mono tabular-nums">
+            {summary.connectedProductionMailboxesCount}
+          </span>
+          <span className="text-[10px] text-slate-400 block mt-1 font-mono">
+            {mailboxes.length} total ({summary.reauthRequiredMailboxesCount} re-auth, {summary.testMailboxesCount} test)
+          </span>
         </div>
       </div>
 
@@ -136,23 +173,38 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ campaigns, mailbox
         <div className="flex items-center justify-between mb-4">
           <div>
             <h3 className="text-sm font-semibold text-white">Mailbox Usage & Daily Allocation</h3>
-            <p className="text-xs text-slate-400">Comparing sent volume vs configured daily limits across rotating inboxes</p>
+            <p className="text-xs text-slate-400">
+              Comparing sent volume vs configured daily limits across configured mailboxes
+            </p>
           </div>
         </div>
 
-        <div className="h-64 w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={mailboxBarData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-              <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
-              <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
-              <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }} />
-              <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-              <Bar dataKey="sentToday" name="Sent Today" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="dailyLimit" name="Daily Safe Quota" fill="#334155" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        {mailboxBarData.length === 0 ? (
+          <div className="h-44 flex items-center justify-center rounded-xl border border-dashed border-slate-800 text-xs text-slate-500">
+            No mailboxes configured yet. Connect an email account in Email Accounts to monitor daily quota usage.
+          </div>
+        ) : (
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={mailboxBarData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+                <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
+                <YAxis stroke="#64748b" fontSize={11} tickLine={false} allowDecimals={false} />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: '#0f172a',
+                    borderColor: '#334155',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
+                <Bar dataKey="sentToday" name="Sent Today" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="dailyLimit" name="Daily Safe Quota" fill="#334155" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </div>
 
       {/* A/B Variant Testing Results */}
@@ -164,42 +216,50 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({ campaigns, mailbox
               A/B Subject & Body Variant Testing Breakdown
             </h3>
             <p className="text-xs text-slate-400">
-              Evaluates response rates between alternative copy variations before declaring statistical winner.
+              Live response tracking across campaign sequence variants persisted in local SQLite.
             </p>
           </div>
+          <span className="text-xs font-mono text-slate-400">
+            {summary.variantResults.length} Variant{summary.variantResults.length === 1 ? '' : 's'} Tracked
+          </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-          <div className="rounded-xl border border-slate-800 bg-slate-800/40 p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-white">Variant A: Question regarding platform scale</span>
-              <span className="rounded bg-blue-500/10 text-blue-400 px-2 py-0.5 text-[10px] font-bold">50% Weight</span>
-            </div>
-            <p className="text-slate-400 text-[11px] leading-relaxed">
-              "Quick question regarding &#123;&#123;company&#125;&#125; platform scale..."
-            </p>
-            <div className="pt-2 flex items-center justify-between border-t border-slate-700/60 font-mono text-[11px]">
-              <span className="text-slate-400">Sent: 22</span>
-              <span className="text-indigo-400 font-semibold">Replies: 3 (13.6%)</span>
-              <span className="text-emerald-400 font-bold">Leader (Sample &gt; 20)</span>
-            </div>
+        {summary.variantResults.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+            {summary.variantResults.map((v) => (
+              <div
+                key={`${v.campaignId}-${v.variantId}`}
+                className="rounded-xl border border-slate-800 bg-slate-800/40 p-4 space-y-2"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-white truncate">
+                    {v.name}: {v.subject || '(No Subject)'}
+                  </span>
+                  <span className="rounded bg-blue-500/10 text-blue-400 px-2 py-0.5 text-[10px] font-mono font-bold shrink-0">
+                    {v.campaignName} · Step {v.stepNumber}
+                  </span>
+                </div>
+                <div className="pt-2 flex items-center justify-between border-t border-slate-700/60 font-mono text-[11px]">
+                  <span className="text-slate-400">Sent: {v.sentCount}</span>
+                  <span className="text-indigo-400 font-semibold">
+                    Replies: {v.replyCount} ({v.replyRate.toFixed(1)}%)
+                  </span>
+                  <span className={v.sentCount >= 20 ? 'text-emerald-400 font-bold' : 'text-slate-400'}>
+                    {v.sentCount === 0
+                      ? 'Not Dispatched'
+                      : v.sentCount >= 20
+                      ? 'Active Sample'
+                      : 'Collecting Sample'}
+                  </span>
+                </div>
+              </div>
+            ))}
           </div>
-
-          <div className="rounded-xl border border-slate-800 bg-slate-800/40 p-4 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-white">Variant B: Scaling developer velocity in Q4</span>
-              <span className="rounded bg-blue-500/10 text-blue-400 px-2 py-0.5 text-[10px] font-bold">50% Weight</span>
-            </div>
-            <p className="text-slate-400 text-[11px] leading-relaxed">
-              "Scaling &#123;&#123;company&#125;&#125;'s developer velocity in Q4..."
-            </p>
-            <div className="pt-2 flex items-center justify-between border-t border-slate-700/60 font-mono text-[11px]">
-              <span className="text-slate-400">Sent: 20</span>
-              <span className="text-indigo-400 font-semibold">Replies: 2 (10.0%)</span>
-              <span className="text-slate-400">Testing</span>
-            </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-slate-800 p-6 text-center text-xs text-slate-500">
+            No A/B variants tested yet. Add A/B variants to an email step inside Campaigns to track live variant performance.
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

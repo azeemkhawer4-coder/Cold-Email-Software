@@ -28,8 +28,17 @@ import {
   Settings,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { Campaign, CampaignStep, LeadList, MailboxAccount, Lead, EmailVariant } from '../types';
+import {
+  Campaign,
+  CampaignStep,
+  LeadList,
+  MailboxAccount,
+  Lead,
+  EmailVariant,
+  WorkspaceSettings,
+} from '../types';
 import { interpolateTemplate } from '../utils/templateEngine';
+import { isProductionConnectedMailbox } from '../utils/senderRotation';
 import { SendNowModal } from '../components/campaigns/SendNowModal';
 import { ScheduleCampaignModal } from '../components/campaigns/ScheduleCampaignModal';
 import { SafetyControlBar } from '../components/campaigns/SafetyControlBar';
@@ -39,7 +48,11 @@ interface CampaignsPageProps {
   lists: LeadList[];
   mailboxes: MailboxAccount[];
   leads: Lead[];
+  workspace?: WorkspaceSettings | null;
+  workerStatus?: { isRunning: boolean; sendingActive: boolean } | null;
   onRefreshCampaigns: () => void;
+  onNavigateToMailboxes?: () => void;
+  onNavigateToDeliverability?: () => void;
   openCreateWizard: boolean;
   onCloseCreateWizard: () => void;
 }
@@ -49,7 +62,11 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
   lists,
   mailboxes,
   leads,
+  workspace,
+  workerStatus,
   onRefreshCampaigns,
+  onNavigateToMailboxes,
+  onNavigateToDeliverability,
   openCreateWizard,
   onCloseCreateWizard,
 }) => {
@@ -58,6 +75,7 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
   const [campaignToDelete, setCampaignToDelete] = useState<{ id: string; name: string } | null>(null);
   const [sendNowCampaign, setSendNowCampaign] = useState<Campaign | null>(null);
   const [scheduleCampaign, setScheduleCampaign] = useState<Campaign | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
   const [launchFeedback, setLaunchFeedback] = useState<{
     id: string;
     reason: string;
@@ -70,36 +88,41 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
   }, [openCreateWizard]);
 
   const handleLaunchCampaign = async (id: string, forceNow = false) => {
+    setPageError(null);
     try {
       const res = await fetch(`/api/campaigns/${id}/launch`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ forceNow }),
       });
-      const data = await res.json();
-      if (data.success) {
-        if (data.batchResult?.processedCount > 0) {
-          confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 } });
-        }
-        setLaunchFeedback({
-          id,
-          reason: data.reason || 'Campaign activated.',
-          inScheduleWindow: data.inScheduleWindow ?? true,
-          batchResult: data.batchResult,
-        });
-        onRefreshCampaigns();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || data.message || 'Failed to launch campaign');
       }
-    } catch (e) {
-      console.error(e);
+      if (data.batchResult?.processedCount > 0) {
+        confetti({ particleCount: 80, spread: 60, origin: { y: 0.6 } });
+      }
+      setLaunchFeedback({
+        id,
+        reason: data.reason || 'Campaign activated.',
+        inScheduleWindow: data.inScheduleWindow ?? true,
+        batchResult: data.batchResult,
+      });
+      onRefreshCampaigns();
+    } catch (e: any) {
+      setPageError(e?.message || 'Failed to launch campaign');
     }
   };
 
   const handlePauseCampaign = async (id: string) => {
+    setPageError(null);
     try {
-      await fetch(`/api/campaigns/${id}/pause`, { method: 'POST' });
+      const res = await fetch(`/api/campaigns/${id}/pause`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to pause campaign');
       onRefreshCampaigns();
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      setPageError(e?.message || 'Failed to pause campaign');
     }
   };
 
@@ -109,12 +132,15 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
 
   const confirmDeleteCampaign = async () => {
     if (!campaignToDelete) return;
+    setPageError(null);
     try {
-      await fetch(`/api/campaigns/${campaignToDelete.id}`, { method: 'DELETE' });
+      const res = await fetch(`/api/campaigns/${campaignToDelete.id}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to delete campaign');
       setCampaignToDelete(null);
       onRefreshCampaigns();
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      setPageError(e?.message || 'Failed to delete campaign');
     }
   };
 
@@ -129,8 +155,14 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
     onCloseCreateWizard();
   };
 
+  const hasActiveWithPausedWorker =
+    (campaigns || []).some((c) => c.status === 'active') &&
+    workerStatus !== undefined &&
+    workerStatus !== null &&
+    !workerStatus.sendingActive;
+
   return (
-    <div className="flex-1 flex flex-col overflow-hidden bg-slate-950 text-slate-100 p-6 space-y-6">
+    <div className="flex-1 flex flex-col overflow-y-auto bg-slate-950 text-slate-100 p-6 space-y-6 custom-scrollbar">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -156,6 +188,37 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
 
       {/* Safety & Worker Control Bar */}
       <SafetyControlBar onRefresh={onRefreshCampaigns} />
+
+      {hasActiveWithPausedWorker && (
+        <div className="rounded-xl bg-amber-950/35 border border-amber-500/40 p-3.5 px-4 text-xs text-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-white">Active campaigns are paused from sending because Worker Dispatch is Paused</p>
+              <p className="text-[11px] text-amber-200/80 mt-0.5">
+                Click Resume Worker in the control bar above or inspect queued jobs in Deliverability.
+              </p>
+            </div>
+          </div>
+          {onNavigateToDeliverability && (
+            <button
+              onClick={onNavigateToDeliverability}
+              className="px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 hover:bg-amber-500/30 font-semibold transition cursor-pointer shrink-0"
+            >
+              Inspect Queue & Deliverability
+            </button>
+          )}
+        </div>
+      )}
+
+      {pageError && (
+        <div className="rounded-xl bg-rose-500/15 border border-rose-500/30 p-3 text-xs text-rose-300 flex items-center justify-between">
+          <span>{pageError}</span>
+          <button onClick={() => setPageError(null)} className="text-rose-400 hover:text-white cursor-pointer">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Launch Feedback & Schedule Notice Banner */}
       {launchFeedback && (
@@ -361,6 +424,8 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
           lists={lists}
           mailboxes={mailboxes}
           leads={leads}
+          workspace={workspace}
+          onNavigateToMailboxes={onNavigateToMailboxes}
           onClose={handleCloseWizard}
           onSaved={() => {
             handleCloseWizard();
@@ -400,6 +465,7 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
         <ScheduleCampaignModal
           campaign={scheduleCampaign}
           mailboxes={mailboxes}
+          workspaceTimezone={workspace?.timezone}
           onClose={() => setScheduleCampaign(null)}
           onScheduled={(c, msg) => {
             setScheduleCampaign(null);
@@ -452,59 +518,78 @@ interface WizardProps {
   lists: LeadList[];
   mailboxes: MailboxAccount[];
   leads: Lead[];
+  workspace?: WorkspaceSettings | null;
+  onNavigateToMailboxes?: () => void;
   onClose: () => void;
   onSaved: () => void;
   onRequestSendNow?: (campaign: Campaign) => void;
   onRequestSchedule?: (campaign: Campaign) => void;
 }
 
+const cloneSteps = (source: CampaignStep[]): CampaignStep[] =>
+  JSON.parse(JSON.stringify(source));
+
 const CampaignBuilderWizard: React.FC<WizardProps> = ({
   campaign,
   lists,
   mailboxes,
   leads,
+  workspace,
+  onNavigateToMailboxes,
   onClose,
   onSaved,
   onRequestSendNow,
   onRequestSchedule,
 }) => {
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4>(1);
+  const originalStepsCount = campaign?.steps?.length || 0;
+  const senderSignOff =
+    workspace?.companyName || workspace?.ownerEmail?.split('@')[0] || 'Your Name';
 
   // Form State
-  const [name, setName] = useState(campaign?.name || 'High-Ticket Enterprise Outreach Q4');
-  const [description, setDescription] = useState(campaign?.description || 'Automated multi-step sequence with conditional branching and A/B tested variants');
-  const [selectedListId, setSelectedListId] = useState(campaign?.leadListId || lists[0]?.id || '');
-  const [selectedMailboxIds, setSelectedMailboxIds] = useState<string[]>(
-    campaign?.mailboxAccountIds || mailboxes.map((m) => m.id)
+  const [name, setName] = useState(campaign?.name || 'New Outreach Sequence');
+  const [description, setDescription] = useState(
+    campaign?.description || 'Multi-step cold email sequence with automated follow-ups'
   );
+  const [selectedListId, setSelectedListId] = useState(campaign?.leadListId || lists[0]?.id || '');
+  const [selectedMailboxIds, setSelectedMailboxIds] = useState<string[]>(() => {
+    if (campaign) {
+      return campaign.mailboxAccountIds || [];
+    }
+    return mailboxes.filter(isProductionConnectedMailbox).map((m) => m.id);
+  });
 
-  // Sequence Steps
-  const [steps, setSteps] = useState<CampaignStep[]>(
-    campaign?.steps || [
+  // Sequence Steps (always deep-cloned on init so cancelling never mutates list items)
+  const [steps, setSteps] = useState<CampaignStep[]>(() => {
+    if (campaign?.steps && campaign.steps.length > 0) {
+      return cloneSteps(campaign.steps);
+    }
+    const now = Date.now();
+    return [
       {
-        id: `step-${Date.now()}-1`,
+        id: `step-${now}-1`,
         campaignId: '',
         stepNumber: 1,
         type: 'email',
         delayHours: 0,
         emailData: {
-          subject: 'Quick question about {{company}} infrastructure',
-          body: 'Hi {{first_name | fallback: "there"}},\n\nI noticed your platform initiatives at {{company}}.\n\nWe recently helped several engineering teams cut egress overhead by 34% without modifying their Kubernetes configurations.\n\nGiven your team\'s focus on {{quarterly_priority | fallback: "modernizing platform scale"}}, would you be open to a brief 10-minute exchange this Thursday to review our benchmark data?\n\nBest,\nAzeem',
+          subject: 'Quick question about {{company | fallback: "your team"}}',
+          body: `Hi {{first_name | fallback: "there"}},\n\nI noticed your work at {{company | fallback: "your company"}}.\n\nWe recently helped similar teams streamline their workflow and would love to share a quick overview.\n\nWould you be open to a brief 10-minute chat next week?\n\nBest,\n${senderSignOff}`,
           variants: [
             {
-              id: `var-${Date.now()}-a`,
-              name: 'Variant A (Benchmark Proof)',
-              subject: 'Quick question about {{company}} infrastructure',
-              body: 'Hi {{first_name | fallback: "there"}},\n\nI noticed your platform initiatives at {{company}}.\n\nWe recently helped several engineering teams cut egress overhead by 34% without modifying their Kubernetes configurations.\n\nGiven your team\'s focus on {{quarterly_priority | fallback: "modernizing platform scale"}}, would you be open to a brief 10-minute exchange this Thursday to review our benchmark data?\n\nBest,\nAzeem',
+              id: `var-${now}-a`,
+              name: 'Variant A (Direct)',
+              subject: 'Quick question about {{company | fallback: "your team"}}',
+              body: `Hi {{first_name | fallback: "there"}},\n\nI noticed your work at {{company | fallback: "your company"}}.\n\nWe recently helped similar teams streamline their workflow and would love to share a quick overview.\n\nWould you be open to a brief 10-minute chat next week?\n\nBest,\n${senderSignOff}`,
               weight: 50,
               sentCount: 0,
               replyCount: 0,
             },
             {
-              id: `var-${Date.now()}-b`,
-              name: 'Variant B (Direct ROI)',
-              subject: 'Cutting multi-cloud latency at {{company}}',
-              body: 'Hi {{first_name | fallback: "there"}},\n\nQuick note regarding infrastructure costs at {{company}}.\n\nWould reducing cross-region data transfer latency by 40% be relevant to your platform roadmap this quarter?\n\nHappy to share our 60-second architecture diagram if you are interested.\n\nBest,\nAzeem',
+              id: `var-${now}-b`,
+              name: 'Variant B (Brief)',
+              subject: 'Idea for {{company | fallback: "your team"}}',
+              body: `Hi {{first_name | fallback: "there"}},\n\nQuick note regarding your priorities at {{company | fallback: "your company"}}.\n\nHappy to send over a 2-minute summary if helpful.\n\nBest,\n${senderSignOff}`,
               weight: 50,
               sentCount: 0,
               replyCount: 0,
@@ -513,14 +598,14 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
         },
       },
       {
-        id: `step-${Date.now()}-2`,
+        id: `step-${now}-2`,
         campaignId: '',
         stepNumber: 2,
         type: 'delay',
         delayHours: 48,
       },
       {
-        id: `step-${Date.now()}-3`,
+        id: `step-${now}-3`,
         campaignId: '',
         stepNumber: 3,
         type: 'condition',
@@ -530,31 +615,31 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
         noStepNumber: 5,
       },
       {
-        id: `step-${Date.now()}-4`,
+        id: `step-${now}-4`,
         campaignId: '',
         stepNumber: 4,
         type: 'email',
         delayHours: 0,
         emailData: {
-          subject: 'Great to connect! Here is my booking link',
-          body: 'Hi {{first_name | fallback: "there"}},\n\nThanks for getting back to me! You can grab whatever 15-minute slot suits your calendar here: https://cal.com/azeem-outbound/15min\n\nLooking forward to speaking.\n\nBest,\nAzeem',
+          subject: 'Great to connect! Scheduling link',
+          body: `Hi {{first_name | fallback: "there"}},\n\nThanks for getting back to me! Please feel free to reply with times that suit your schedule.\n\nLooking forward to speaking.\n\nBest,\n${senderSignOff}`,
           variants: [],
         },
       },
       {
-        id: `step-${Date.now()}-5`,
+        id: `step-${now}-5`,
         campaignId: '',
         stepNumber: 5,
         type: 'email',
         delayHours: 0,
         emailData: {
-          subject: 'Re: Quick question about {{company}} infrastructure',
-          body: 'Hi {{first_name | fallback: "there"}},\n\nCircling back on this in case my earlier note got buried in your inbox.\n\nHere is a 60-second Loom recording showing the exact workflow: https://outboundos.com/demo\n\nWould 15 minutes next Tuesday or Wednesday work better for your schedule?\n\nBest,\nAzeem',
+          subject: 'Re: Quick question about {{company | fallback: "your team"}}',
+          body: `Hi {{first_name | fallback: "there"}},\n\nCircling back on this in case my earlier note got buried in your inbox.\n\nWould 15 minutes next Tuesday or Wednesday work for a brief intro?\n\nBest,\n${senderSignOff}`,
           variants: [],
         },
       },
-    ]
-  );
+    ];
+  });
 
   // Active A/B variant tab index per step index
   const [activeVariantTab, setActiveVariantTab] = useState<Record<number, number>>({});
@@ -572,7 +657,9 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
   );
   const [startTime, setStartTime] = useState(campaign?.schedule?.startTime || '08:30');
   const [endTime, setEndTime] = useState(campaign?.schedule?.endTime || '17:30');
-  const [timezone, setTimezone] = useState(campaign?.schedule?.timezone || 'America/Los_Angeles');
+  const [timezone, setTimezone] = useState(
+    campaign?.schedule?.timezone || workspace?.timezone || 'America/Chicago'
+  );
   const [useRecipientTimezone, setUseRecipientTimezone] = useState(
     campaign?.schedule?.useRecipientTimezone !== false
   );
@@ -580,20 +667,43 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
     campaign?.schedule?.minIntervalSeconds || 60
   );
 
-  // Lead preview selector
+  // Scope preview leads strictly to selectedListId
+  const listLeads = React.useMemo(
+    () => leads.filter((l) => Boolean(selectedListId) && l.listId === selectedListId),
+    [leads, selectedListId]
+  );
+  const eligibleRecipients = React.useMemo(
+    () =>
+      listLeads.filter(
+        (l) =>
+          !l.unsubscribeStatus &&
+          !l.bounceStatus &&
+          !['unsubscribed', 'bounced', 'replied'].includes(l.status)
+      ),
+    [listLeads]
+  );
+  const validSelectedMailboxIds = React.useMemo(
+    () =>
+      selectedMailboxIds.filter(
+        (id) => mailboxes.find((m) => m.id === id)?.status === 'connected'
+      ),
+    [selectedMailboxIds, mailboxes]
+  );
+
   const [selectedLeadIndex, setSelectedLeadIndex] = useState(0);
-  const previewLead = leads[selectedLeadIndex] || leads[0] || {
-    firstName: 'Alex',
-    lastName: 'Rivera',
-    fullName: 'Alex Rivera',
-    company: 'Stripe',
-    jobTitle: 'VP Infrastructure',
-    email: 'alex@stripe.com',
-    city: 'San Francisco',
-    customFields: {
-      quarterly_priority: 'latency reduction',
-    },
-  };
+  React.useEffect(() => {
+    setSelectedLeadIndex(0);
+  }, [selectedListId]);
+
+  const previewLead =
+    listLeads.length > 0 ? listLeads[Math.min(selectedLeadIndex, listLeads.length - 1)] : null;
+
+  // Save/Validation state
+  const [wizardError, setWizardError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [pendingStepShrinkAction, setPendingStepShrinkAction] = useState<
+    'draft' | 'send_now' | 'schedule' | null
+  >(null);
 
   // Custom Variable helper modal
   const [showCustomVarModal, setShowCustomVarModal] = useState(false);
@@ -603,15 +713,15 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
 
   // AI Generator state
   const [showAiModal, setShowAiModal] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState('B2B SaaS VPs of Engineering needing cloud cost reduction');
+  const [aiPrompt, setAiPrompt] = useState('B2B SaaS engineering leaders evaluating workflow automation');
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
 
-  const handleToggleMailbox = (id: string) => {
-    if (selectedMailboxIds.includes(id)) {
-      if (selectedMailboxIds.length === 1) return; // Keep at least one
-      setSelectedMailboxIds(selectedMailboxIds.filter((m) => m !== id));
+  const handleToggleMailbox = (mb: MailboxAccount) => {
+    if (mb.status !== 'connected') return;
+    if (selectedMailboxIds.includes(mb.id)) {
+      setSelectedMailboxIds(selectedMailboxIds.filter((m) => m !== mb.id));
     } else {
-      setSelectedMailboxIds([...selectedMailboxIds, id]);
+      setSelectedMailboxIds([...selectedMailboxIds, mb.id]);
     }
   };
 
@@ -624,6 +734,11 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
     }
   };
 
+  // Pure Step Updater helper
+  const updateStepAt = (idx: number, updater: (step: CampaignStep) => CampaignStep) => {
+    setSteps((prev) => prev.map((s, i) => (i === idx ? updater(s) : s)));
+  };
+
   // Step Management
   const handleAddEmailStep = () => {
     const newStepNumber = steps.length + 1;
@@ -634,12 +749,12 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
       type: 'email',
       delayHours: 0,
       emailData: {
-        subject: 'Quick follow up regarding {{company}}',
-        body: 'Hi {{first_name | fallback: "there"}},\n\nWanted to check in one last time regarding our previous note.\n\nBest,\nAzeem',
+        subject: 'Quick follow up regarding {{company | fallback: "your team"}}',
+        body: `Hi {{first_name | fallback: "there"}},\n\nWanted to check in one last time regarding our previous note.\n\nBest,\n${senderSignOff}`,
         variants: [],
       },
     };
-    setSteps([...steps, newStep]);
+    setSteps((prev) => [...prev, newStep]);
   };
 
   const handleAddDelayStep = () => {
@@ -651,7 +766,7 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
       type: 'delay',
       delayHours: 48,
     };
-    setSteps([...steps, newStep]);
+    setSteps((prev) => [...prev, newStep]);
   };
 
   const handleAddConditionStep = () => {
@@ -666,25 +781,25 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
       yesStepNumber: undefined,
       noStepNumber: undefined,
     };
-    setSteps([...steps, newStep]);
+    setSteps((prev) => [...prev, newStep]);
   };
 
   const handleRemoveStep = (index: number) => {
     if (steps.length <= 1) return;
-    const next = [...steps];
-    next.splice(index, 1);
-    next.forEach((s, i) => (s.stepNumber = i + 1));
-    setSteps(next);
+    setSteps((prev) =>
+      prev
+        .filter((_, i) => i !== index)
+        .map((s, i) => ({ ...s, stepNumber: i + 1 }))
+    );
   };
 
-  // A/B Variant Management
+  // A/B Variant Management (pure immutable updates)
   const handleAddVariant = (stepIdx: number) => {
     const step = steps[stepIdx];
-    if (!step.emailData) return;
+    if (!step?.emailData) return;
 
     const currentVariants = step.emailData.variants || [];
-    // If no variants existed yet, initialize Variant A from base emailData
-    const newVariants: EmailVariant[] = [...currentVariants];
+    const newVariants: EmailVariant[] = currentVariants.map((v) => ({ ...v }));
     if (newVariants.length === 0) {
       newVariants.push({
         id: `var-${Date.now()}-a`,
@@ -708,60 +823,81 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
       replyCount: 0,
     });
 
-    // Re-balance weights evenly
     const evenWeight = Math.floor(100 / newVariants.length);
-    newVariants.forEach((v, i) => {
-      v.weight = i === newVariants.length - 1 ? 100 - evenWeight * (newVariants.length - 1) : evenWeight;
-    });
+    const rebalanced = newVariants.map((v, i) => ({
+      ...v,
+      weight: i === newVariants.length - 1 ? 100 - evenWeight * (newVariants.length - 1) : evenWeight,
+    }));
 
-    const nextSteps = [...steps];
-    nextSteps[stepIdx].emailData!.variants = newVariants;
-    setSteps(nextSteps);
-    setActiveVariantTab({ ...activeVariantTab, [stepIdx]: newVariants.length - 1 });
+    updateStepAt(stepIdx, (s) => ({
+      ...s,
+      emailData: s.emailData ? { ...s.emailData, variants: rebalanced } : s.emailData,
+    }));
+    setActiveVariantTab((prev) => ({ ...prev, [stepIdx]: rebalanced.length - 1 }));
   };
 
   const handleRemoveVariant = (stepIdx: number, varIdx: number) => {
     const step = steps[stepIdx];
-    if (!step.emailData?.variants) return;
+    if (!step?.emailData?.variants) return;
 
-    const nextVariants = [...step.emailData.variants];
-    nextVariants.splice(varIdx, 1);
+    const filtered = step.emailData.variants
+      .filter((_, i) => i !== varIdx)
+      .map((v) => ({ ...v }));
 
-    if (nextVariants.length > 0) {
-      const evenWeight = Math.floor(100 / nextVariants.length);
-      nextVariants.forEach((v, i) => {
-        v.weight = i === nextVariants.length - 1 ? 100 - evenWeight * (nextVariants.length - 1) : evenWeight;
-      });
-    }
+    const rebalanced =
+      filtered.length > 0
+        ? filtered.map((v, i) => {
+            const evenWeight = Math.floor(100 / filtered.length);
+            return {
+              ...v,
+              weight: i === filtered.length - 1 ? 100 - evenWeight * (filtered.length - 1) : evenWeight,
+            };
+          })
+        : [];
 
-    const nextSteps = [...steps];
-    nextSteps[stepIdx].emailData!.variants = nextVariants;
-    setSteps(nextSteps);
-    setActiveVariantTab({ ...activeVariantTab, [stepIdx]: 0 });
+    updateStepAt(stepIdx, (s) => ({
+      ...s,
+      emailData: s.emailData ? { ...s.emailData, variants: rebalanced } : s.emailData,
+    }));
+    setActiveVariantTab((prev) => ({ ...prev, [stepIdx]: 0 }));
   };
 
   const handleInsertVariableSnippet = (stepIdx: number, snippet: string) => {
-    const nextSteps = [...steps];
-    const step = nextSteps[stepIdx];
-    if (!step.emailData) return;
-
-    const variants = step.emailData.variants;
     const currentTab = activeVariantTab[stepIdx] || 0;
-
-    if (variants && variants.length > 0 && variants[currentTab]) {
-      variants[currentTab].body += ` ${snippet}`;
-    } else {
-      step.emailData.body += ` ${snippet}`;
-    }
-    setSteps(nextSteps);
+    updateStepAt(stepIdx, (s) => {
+      if (!s.emailData) return s;
+      const variants = s.emailData.variants || [];
+      if (variants.length > 0 && variants[currentTab]) {
+        return {
+          ...s,
+          emailData: {
+            ...s.emailData,
+            variants: variants.map((v, vi) =>
+              vi === currentTab ? { ...v, body: `${v.body} ${snippet}` } : v
+            ),
+          },
+        };
+      }
+      return {
+        ...s,
+        emailData: {
+          ...s.emailData,
+          body: `${s.emailData.body} ${snippet}`,
+        },
+      };
+    });
   };
 
-  const handleSaveCampaign = async (action: 'draft' | 'send_now' | 'schedule' = 'draft') => {
+  const commitSaveCampaign = async (action: 'draft' | 'send_now' | 'schedule' = 'draft') => {
+    setWizardError(null);
+    setPendingStepShrinkAction(null);
+    setIsSaving(true);
+
     const payload = {
       name,
       description,
       leadListId: selectedListId,
-      mailboxAccountIds: selectedMailboxIds,
+      mailboxAccountIds: validSelectedMailboxIds,
       schedule: {
         startDate: campaign?.schedule?.startDate || new Date().toISOString().split('T')[0],
         endDate: campaign?.schedule?.endDate,
@@ -794,7 +930,8 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Failed to update campaign');
         savedCamp = data.campaign || { ...campaign, ...payload };
       } else {
         const res = await fetch('/api/campaigns', {
@@ -802,7 +939,8 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Failed to create campaign');
         savedCamp = data.campaign;
       }
 
@@ -813,10 +951,41 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
       } else {
         onSaved();
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setWizardError(err?.message || 'Failed to save campaign');
+    } finally {
+      setIsSaving(false);
     }
   };
+
+  const handleSaveCampaign = (action: 'draft' | 'send_now' | 'schedule' = 'draft') => {
+    setWizardError(null);
+    if (!name.trim()) {
+      setWizardError('Campaign name is required.');
+      return;
+    }
+    if ((action === 'send_now' || action === 'schedule') && validSelectedMailboxIds.length === 0) {
+      setWizardError('Select at least one connected sending mailbox before scheduling or sending.');
+      return;
+    }
+    if ((action === 'send_now' || action === 'schedule') && eligibleRecipients.length === 0) {
+      setWizardError('Selected list has 0 eligible recipients. Add leads or pick another list before launching.');
+      return;
+    }
+    if (campaign?.id && originalStepsCount > 0 && steps.length < originalStepsCount) {
+      setPendingStepShrinkAction(action);
+      return;
+    }
+    void commitSaveCampaign(action);
+  };
+
+  const ownerDisplayName = workspace?.companyName || workspace?.ownerEmail || 'Workspace Owner';
+  const ownerInitials = ownerDisplayName
+    .split(/\s+|@/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() || '')
+    .join('') || 'WS';
 
   const dayLabels = [
     { day: 1, label: 'Mon' },
@@ -909,9 +1078,9 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
                 <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider font-mono">Assigned Campaign Owner</span>
                 <div className="flex items-center gap-2 text-slate-200">
                   <div className="h-6 w-6 rounded-full bg-blue-600/30 text-blue-400 flex items-center justify-center font-bold text-xs">
-                    AK
+                    {ownerInitials}
                   </div>
-                  <span className="font-medium">Azeem Khawer (Workspace Owner)</span>
+                  <span className="font-medium">{ownerDisplayName} (Workspace Owner)</span>
                 </div>
               </div>
             </div>
@@ -1026,32 +1195,51 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
 
               {/* Prospect Preview Switcher */}
               <div className="flex items-center justify-between p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-xs">
-                <div className="flex items-center gap-2">
-                  <Eye className="h-4 w-4 text-blue-400" />
-                  <span className="text-slate-300 font-medium">Live Interpolation Preview:</span>
-                  <span className="text-white font-semibold">{previewLead.fullName}</span>
-                  <span className="text-slate-400 font-mono">({previewLead.jobTitle} @ {previewLead.company})</span>
-                </div>
+                {previewLead ? (
+                  <>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Eye className="h-4 w-4 text-blue-400 shrink-0" />
+                      <span className="text-slate-300 font-medium">Live Interpolation Preview:</span>
+                      <span className="text-white font-semibold truncate">{previewLead.fullName}</span>
+                      <span className="text-slate-400 font-mono truncate">
+                        ({previewLead.jobTitle || 'Role N/A'} @ {previewLead.company || 'Company N/A'})
+                      </span>
+                    </div>
 
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => setSelectedLeadIndex((prev) => (prev > 0 ? prev - 1 : Math.max(leads.length - 1, 0)))}
-                    className="p-1 rounded bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
-                    title="Previous Prospect"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                  </button>
-                  <span className="text-[11px] font-mono text-slate-400">
-                    Lead {selectedLeadIndex + 1} of {Math.max(leads.length, 1)}
-                  </span>
-                  <button
-                    onClick={() => setSelectedLeadIndex((prev) => (prev < leads.length - 1 ? prev + 1 : 0))}
-                    className="p-1 rounded bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
-                    title="Next Prospect"
-                  >
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
-                </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedLeadIndex((prev) =>
+                            prev > 0 ? prev - 1 : Math.max(listLeads.length - 1, 0)
+                          )
+                        }
+                        className="p-1 rounded bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
+                        title="Previous Prospect"
+                      >
+                        <ChevronLeft className="h-3.5 w-3.5" />
+                      </button>
+                      <span className="text-[11px] font-mono text-slate-400">
+                        Lead {selectedLeadIndex + 1} of {listLeads.length}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedLeadIndex((prev) => (prev < listLeads.length - 1 ? prev + 1 : 0))
+                        }
+                        className="p-1 rounded bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
+                        title="Next Prospect"
+                      >
+                        <ChevronRight className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex items-center gap-2 text-amber-300">
+                    <AlertCircle className="h-4 w-4 text-amber-400 shrink-0" />
+                    <span>Selected list has 0 leads — add leads to preview merge tags</span>
+                  </div>
+                )}
               </div>
 
               {/* Steps Flow Nodes */}
@@ -1139,9 +1327,8 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
                               min={1}
                               value={step.delayHours}
                               onChange={(e) => {
-                                const next = [...steps];
-                                next[idx].delayHours = parseInt(e.target.value) || 24;
-                                setSteps(next);
+                                const val = parseInt(e.target.value) || 24;
+                                updateStepAt(idx, (s) => ({ ...s, delayHours: val }));
                               }}
                               className="w-20 rounded bg-slate-900 border border-slate-700 px-2.5 py-1 text-center font-mono text-xs text-cyan-200 font-bold focus:outline-none focus:border-cyan-500"
                             />
@@ -1157,9 +1344,8 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
                               <select
                                 value={step.conditionType || 'if_replied'}
                                 onChange={(e) => {
-                                  const next = [...steps];
-                                  next[idx].conditionType = e.target.value as any;
-                                  setSteps(next);
+                                  const val = e.target.value as any;
+                                  updateStepAt(idx, (s) => ({ ...s, conditionType: val }));
                                 }}
                                 className="rounded-lg bg-slate-900 border border-purple-500/40 px-3 py-1.5 text-purple-200 font-semibold focus:outline-none"
                               >
@@ -1188,9 +1374,8 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
                                   <select
                                     value={step.yesStepNumber || ''}
                                     onChange={(e) => {
-                                      const next = [...steps];
-                                      next[idx].yesStepNumber = e.target.value ? parseInt(e.target.value) : undefined;
-                                      setSteps(next);
+                                      const val = e.target.value ? parseInt(e.target.value) : undefined;
+                                      updateStepAt(idx, (s) => ({ ...s, yesStepNumber: val }));
                                     }}
                                     className="flex-1 rounded bg-slate-900 border border-emerald-500/40 px-2.5 py-1 text-emerald-200 font-mono text-xs focus:outline-none"
                                   >
@@ -1223,9 +1408,8 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
                                   <select
                                     value={step.noStepNumber || ''}
                                     onChange={(e) => {
-                                      const next = [...steps];
-                                      next[idx].noStepNumber = e.target.value ? parseInt(e.target.value) : undefined;
-                                      setSteps(next);
+                                      const val = e.target.value ? parseInt(e.target.value) : undefined;
+                                      updateStepAt(idx, (s) => ({ ...s, noStepNumber: val }));
                                     }}
                                     className="flex-1 rounded bg-slate-900 border border-rose-500/40 px-2.5 py-1 text-rose-200 font-mono text-xs focus:outline-none"
                                   >
@@ -1277,11 +1461,18 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
                                     max={100}
                                     value={currentVariant?.weight || 50}
                                     onChange={(e) => {
-                                      const next = [...steps];
-                                      if (next[idx].emailData?.variants[activeVarIdx]) {
-                                        next[idx].emailData!.variants[activeVarIdx].weight = parseInt(e.target.value) || 50;
-                                      }
-                                      setSteps(next);
+                                      const val = parseInt(e.target.value) || 50;
+                                      updateStepAt(idx, (s) => ({
+                                        ...s,
+                                        emailData: s.emailData
+                                          ? {
+                                              ...s.emailData,
+                                              variants: s.emailData.variants.map((v, vi) =>
+                                                vi === activeVarIdx ? { ...v, weight: val } : v
+                                              ),
+                                            }
+                                          : s.emailData,
+                                      }));
                                     }}
                                     className="w-14 rounded bg-slate-900 border border-slate-700 px-2 py-0.5 text-center font-mono text-xs text-white"
                                   />
@@ -1306,13 +1497,25 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
                                 type="text"
                                 value={currentVariant ? currentVariant.subject : step.emailData.subject}
                                 onChange={(e) => {
-                                  const next = [...steps];
-                                  if (currentVariant) {
-                                    next[idx].emailData!.variants[activeVarIdx].subject = e.target.value;
-                                  } else {
-                                    next[idx].emailData!.subject = e.target.value;
-                                  }
-                                  setSteps(next);
+                                  const val = e.target.value;
+                                  updateStepAt(idx, (s) => {
+                                    if (!s.emailData) return s;
+                                    if (currentVariant) {
+                                      return {
+                                        ...s,
+                                        emailData: {
+                                          ...s.emailData,
+                                          variants: s.emailData.variants.map((v, vi) =>
+                                            vi === activeVarIdx ? { ...v, subject: val } : v
+                                          ),
+                                        },
+                                      };
+                                    }
+                                    return {
+                                      ...s,
+                                      emailData: { ...s.emailData, subject: val },
+                                    };
+                                  });
                                 }}
                                 className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3.5 py-2 text-slate-100 font-mono text-xs focus:border-blue-500/60 focus:outline-none"
                               />
@@ -1325,13 +1528,25 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
                                 rows={6}
                                 value={currentVariant ? currentVariant.body : step.emailData.body}
                                 onChange={(e) => {
-                                  const next = [...steps];
-                                  if (currentVariant) {
-                                    next[idx].emailData!.variants[activeVarIdx].body = e.target.value;
-                                  } else {
-                                    next[idx].emailData!.body = e.target.value;
-                                  }
-                                  setSteps(next);
+                                  const val = e.target.value;
+                                  updateStepAt(idx, (s) => {
+                                    if (!s.emailData) return s;
+                                    if (currentVariant) {
+                                      return {
+                                        ...s,
+                                        emailData: {
+                                          ...s.emailData,
+                                          variants: s.emailData.variants.map((v, vi) =>
+                                            vi === activeVarIdx ? { ...v, body: val } : v
+                                          ),
+                                        },
+                                      };
+                                    }
+                                    return {
+                                      ...s,
+                                      emailData: { ...s.emailData, body: val },
+                                    };
+                                  });
                                 }}
                                 className="w-full rounded-lg bg-slate-900 border border-slate-800 p-3 text-slate-100 font-mono text-xs leading-relaxed focus:border-blue-500/60 focus:outline-none"
                               />
@@ -1371,26 +1586,34 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
 
                             {/* Live Lead Interpolated Preview */}
                             <div className="rounded-xl bg-slate-950/80 border border-slate-800/90 p-3.5 mt-2 space-y-1.5">
-                              <div className="flex items-center justify-between">
-                                <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold font-mono">
-                                  Rendered Preview for {previewLead.fullName} ({previewLead.company})
-                                </span>
-                                <span className="text-[10px] font-mono text-emerald-400">
-                                  {currentVariant ? currentVariant.name : 'Primary'}
-                                </span>
-                              </div>
-                              <p className="font-semibold text-slate-200 text-xs">
-                                {interpolateTemplate(
-                                  currentVariant ? currentVariant.subject : step.emailData.subject,
-                                  previewLead
-                                )}
-                              </p>
-                              <p className="text-slate-300 text-xs whitespace-pre-wrap font-mono leading-relaxed bg-slate-900/50 p-2.5 rounded-lg border border-slate-800/60">
-                                {interpolateTemplate(
-                                  currentVariant ? currentVariant.body : step.emailData.body,
-                                  previewLead
-                                )}
-                              </p>
+                              {previewLead ? (
+                                <>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-slate-500 uppercase tracking-wider font-semibold font-mono">
+                                      Rendered Preview for {previewLead.fullName} ({previewLead.company || 'Company N/A'})
+                                    </span>
+                                    <span className="text-[10px] font-mono text-emerald-400">
+                                      {currentVariant ? currentVariant.name : 'Primary'}
+                                    </span>
+                                  </div>
+                                  <p className="font-semibold text-slate-200 text-xs">
+                                    {interpolateTemplate(
+                                      currentVariant ? currentVariant.subject : step.emailData.subject,
+                                      previewLead
+                                    )}
+                                  </p>
+                                  <p className="text-slate-300 text-xs whitespace-pre-wrap font-mono leading-relaxed bg-slate-900/50 p-2.5 rounded-lg border border-slate-800/60">
+                                    {interpolateTemplate(
+                                      currentVariant ? currentVariant.body : step.emailData.body,
+                                      previewLead
+                                    )}
+                                  </p>
+                                </>
+                              ) : (
+                                <p className="text-[11px] text-amber-300/90">
+                                  Selected list has 0 leads — add leads to preview live merge tag rendering.
+                                </p>
+                              )}
                             </div>
                           </div>
                         )}
@@ -1405,6 +1628,22 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
           {/* STEP 4: SENDERS & SCHEDULE */}
           {currentStep === 4 && (
             <div className="max-w-2xl mx-auto space-y-5 text-xs">
+              {/* Pre-launch readiness summary */}
+              {(validSelectedMailboxIds.length === 0 || eligibleRecipients.length === 0) && (
+                <div className="rounded-xl bg-amber-950/35 border border-amber-500/40 p-3.5 text-amber-200 flex items-start gap-2.5">
+                  <AlertCircle className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="font-semibold text-white">Action Required Before Launching</p>
+                    {validSelectedMailboxIds.length === 0 && (
+                      <p className="text-[11px]">• Select at least one connected sending mailbox below (re-auth/disconnected senders cannot send).</p>
+                    )}
+                    {eligibleRecipients.length === 0 && (
+                      <p className="text-[11px]">• Selected target list has 0 eligible leads (unsubscribed, bounced, and replied leads are excluded).</p>
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Connected Mailboxes Selection */}
               <div className="surface-card rounded-xl p-5 space-y-4">
                 <div className="flex items-center justify-between">
@@ -1414,50 +1653,90 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
                       Outreach is load-balanced across selected accounts to safeguard deliverability.
                     </p>
                   </div>
-                  <span className="text-xs font-mono font-medium text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                    {selectedMailboxIds.length} Senders Active
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-mono text-slate-300 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                      {eligibleRecipients.length} Eligible Leads
+                    </span>
+                    <span
+                      className={`text-xs font-mono font-medium px-2 py-0.5 rounded border ${
+                        validSelectedMailboxIds.length > 0
+                          ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                          : 'text-rose-400 bg-rose-500/10 border-rose-500/20'
+                      }`}
+                    >
+                      {validSelectedMailboxIds.length} Connected Selected
+                    </span>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
                   {mailboxes.map((mb) => {
-                    const isChecked = selectedMailboxIds.includes(mb.id);
+                    const isConnected = mb.status === 'connected';
+                    const isChecked = isConnected && selectedMailboxIds.includes(mb.id);
                     return (
                       <div
                         key={mb.id}
-                        onClick={() => handleToggleMailbox(mb.id)}
-                        className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition ${
-                          isChecked
-                            ? 'bg-blue-600/15 border-blue-500/40 text-blue-200 shadow-xs'
-                            : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-800/60'
+                        onClick={() => isConnected && handleToggleMailbox(mb)}
+                        className={`flex items-center justify-between p-3 rounded-lg border transition ${
+                          !isConnected
+                            ? 'bg-slate-950/60 border-slate-800/70 text-slate-500 opacity-75 cursor-not-allowed'
+                            : isChecked
+                            ? 'bg-blue-600/15 border-blue-500/40 text-blue-200 shadow-xs cursor-pointer'
+                            : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:bg-slate-800/60 cursor-pointer'
                         }`}
                       >
-                        <div className="flex items-center gap-3 truncate">
+                        <div className="flex items-center gap-3 min-w-0">
                           <input
                             type="checkbox"
                             checked={isChecked}
+                            disabled={!isConnected}
                             readOnly
-                            className="rounded border-slate-700 text-blue-600 cursor-pointer"
+                            className="rounded border-slate-700 text-blue-600 cursor-pointer disabled:opacity-50"
                           />
-                          <div>
-                            <div className="flex items-center gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <span className="font-semibold text-slate-200">{mb.name}</span>
                               <span className="text-[10px] text-slate-500 font-mono uppercase">({mb.provider})</span>
                               {mb.isTestMailbox && (
-                                <span className="rounded bg-amber-500/10 px-1.5 py-0.2 text-[9px] font-mono text-amber-400 border border-amber-500/20">
-                                  Test Mailbox
+                                <span className="rounded bg-amber-500/15 px-1.5 py-0.2 text-[9px] font-mono text-amber-300 border border-amber-500/30">
+                                  TEST RIG
                                 </span>
                               )}
+                              <span
+                                className={`rounded px-1.5 py-0.2 text-[9px] font-mono uppercase border ${
+                                  mb.status === 'connected'
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                    : mb.status === 'reauth_required'
+                                    ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                                    : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                                }`}
+                              >
+                                {mb.status === 'reauth_required' ? 'Re-auth Required' : mb.status}
+                              </span>
                             </div>
-                            <span className="text-[11px] text-slate-400">{mb.email}</span>
+                            <span className="text-[11px] text-slate-400 font-mono block truncate">{mb.email}</span>
                           </div>
                         </div>
 
-                        <div className="text-right font-mono">
-                          <span className="text-slate-300 font-medium block tabular-nums">
-                            {mb.sentToday} / {mb.dailyLimit} sent today
-                          </span>
-                          <span className="text-emerald-400 text-[10px]">Health: {mb.healthScore}%</span>
+                        <div className="flex items-center gap-3 shrink-0">
+                          {!isConnected && onNavigateToMailboxes && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onNavigateToMailboxes();
+                              }}
+                              className="px-2.5 py-1 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 text-[11px] font-medium cursor-pointer"
+                            >
+                              Reconnect
+                            </button>
+                          )}
+                          <div className="text-right font-mono">
+                            <span className="text-slate-300 font-medium block tabular-nums">
+                              {mb.sentToday} / {mb.dailyLimit} sent today
+                            </span>
+                            <span className="text-emerald-400 text-[10px]">Health: {mb.healthScore}%</span>
+                          </div>
                         </div>
                       </div>
                     );
@@ -1614,6 +1893,14 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
         </div>
 
         {/* Wizard Footer */}
+        {wizardError && (
+          <div className="px-6 py-2.5 bg-rose-500/15 border-t border-rose-500/30 text-xs text-rose-300 flex items-center justify-between">
+            <span>{wizardError}</span>
+            <button onClick={() => setWizardError(null)} className="text-rose-400 hover:text-white cursor-pointer">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
         <div className="p-4 px-6 border-t border-slate-800/80 bg-slate-900/60 flex items-center justify-between">
           <button
             type="button"
@@ -1626,10 +1913,11 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
           <div className="flex items-center gap-2">
             <button
               type="button"
+              disabled={isSaving}
               onClick={() => handleSaveCampaign('draft')}
-              className="rounded-lg bg-slate-900 border border-slate-800 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 cursor-pointer"
+              className="rounded-lg bg-slate-900 border border-slate-800 px-4 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800 cursor-pointer disabled:opacity-50"
             >
-              Save Sequence as Draft
+              {isSaving ? 'Saving...' : 'Save Sequence as Draft'}
             </button>
 
             {currentStep < 4 ? (
@@ -1645,16 +1933,18 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  disabled={isSaving || validSelectedMailboxIds.length === 0 || eligibleRecipients.length === 0}
                   onClick={() => handleSaveCampaign('schedule')}
-                  className="flex items-center gap-1.5 rounded-lg bg-slate-900 border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 shadow-xs cursor-pointer"
+                  className="flex items-center gap-1.5 rounded-lg bg-slate-900 border border-slate-700 px-4 py-2 text-xs font-semibold text-slate-200 hover:text-white hover:bg-slate-800 shadow-xs cursor-pointer disabled:opacity-50"
                 >
                   <Calendar className="h-3.5 w-3.5 text-blue-400" />
                   <span>Schedule Campaign</span>
                 </button>
                 <button
                   type="button"
+                  disabled={isSaving || validSelectedMailboxIds.length === 0 || eligibleRecipients.length === 0}
                   onClick={() => handleSaveCampaign('send_now')}
-                  className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white hover:bg-emerald-500 shadow-md shadow-emerald-600/30 cursor-pointer"
+                  className="flex items-center gap-1.5 rounded-lg bg-emerald-600 px-5 py-2 text-xs font-bold text-white hover:bg-emerald-500 shadow-md shadow-emerald-600/30 cursor-pointer disabled:opacity-50"
                 >
                   <Send className="h-3.5 w-3.5" />
                   <span>Send Campaign Now</span>
@@ -1663,6 +1953,38 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
             )}
           </div>
         </div>
+
+        {/* STEP-SHRINK CONFIRMATION MODAL */}
+        {pendingStepShrinkAction && (
+          <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/80 p-4">
+            <div className="w-full max-w-md rounded-xl bg-slate-900 border border-amber-500/40 p-5 shadow-2xl text-slate-200 space-y-4">
+              <div className="flex items-center gap-2.5 text-amber-400">
+                <AlertCircle className="h-5 w-5 shrink-0" />
+                <h4 className="text-sm font-bold text-white">Confirm Removing Sequence Steps</h4>
+              </div>
+              <p className="text-xs text-slate-300 leading-relaxed">
+                This campaign originally had <span className="font-mono font-bold text-white">{originalStepsCount}</span> steps and now has{' '}
+                <span className="font-mono font-bold text-amber-300">{steps.length}</span> steps. Saving will permanently replace the previous sequence steps.
+              </p>
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setPendingStepShrinkAction(null)}
+                  className="rounded-lg border border-slate-700 px-3.5 py-1.5 text-xs text-slate-300 hover:bg-slate-800 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => commitSaveCampaign(pendingStepShrinkAction)}
+                  className="rounded-lg bg-amber-600 hover:bg-amber-500 px-4 py-1.5 text-xs font-semibold text-white cursor-pointer"
+                >
+                  Confirm & Save Sequence
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* CUSTOM VARIABLE MODAL */}
         {showCustomVarModal && (

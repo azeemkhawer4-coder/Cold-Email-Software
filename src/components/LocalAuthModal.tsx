@@ -4,9 +4,10 @@ import { ShieldCheck, Lock, User, Mail, Building, Key, CheckCircle2, ArrowRight,
 interface LocalAuthModalProps {
   isSetup: boolean; // false = first-run setup; true = login
   onAuthSuccess: (user: any) => void;
+  onContinueLocal?: () => void;
 }
 
-export const LocalAuthModal: React.FC<LocalAuthModalProps> = ({ isSetup, onAuthSuccess }) => {
+export const LocalAuthModal: React.FC<LocalAuthModalProps> = ({ isSetup, onAuthSuccess, onContinueLocal }) => {
   const [mode, setMode] = useState<'setup' | 'login'>(isSetup ? 'login' : 'setup');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -75,7 +76,7 @@ export const LocalAuthModal: React.FC<LocalAuthModalProps> = ({ isSetup, onAuthS
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#070b14] p-4">
       <div className="surface-card rounded-2xl border border-slate-700/80 p-8 max-w-md w-full space-y-6 shadow-2xl relative overflow-hidden">
         {/* Subtle glow accent */}
         <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none -translate-y-12 translate-x-12" />
@@ -90,7 +91,7 @@ export const LocalAuthModal: React.FC<LocalAuthModalProps> = ({ isSetup, onAuthS
           </h2>
           <p className="text-xs text-slate-400 leading-relaxed">
             {mode === 'setup'
-              ? 'Create your local administrator credentials. All accounts, campaigns, and encrypted keys are stored locally in SQLite.'
+              ? 'Create your local administrator credentials to password-protect this workspace, or continue directly in local single-user mode.'
               : 'Sign in to access your local OutboundOS workspace.'}
           </p>
         </div>
@@ -111,7 +112,7 @@ export const LocalAuthModal: React.FC<LocalAuthModalProps> = ({ isSetup, onAuthS
               <input
                 type="text"
                 required
-                placeholder="e.g. Azeem Khawer"
+                placeholder="e.g. Workspace Owner"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className="w-full rounded-lg bg-slate-900 border border-slate-700 px-3.5 py-2 text-slate-100 focus:outline-none focus:border-blue-500"
@@ -200,10 +201,20 @@ export const LocalAuthModal: React.FC<LocalAuthModalProps> = ({ isSetup, onAuthS
             <span>{isLoading ? 'Processing...' : mode === 'setup' ? 'Create Administrator & Start' : 'Sign In Locally'}</span>
             <ArrowRight className="h-4 w-4" />
           </button>
+
+          {!isSetup && onContinueLocal && (
+            <button
+              type="button"
+              onClick={onContinueLocal}
+              className="w-full rounded-lg border border-slate-700 bg-slate-900/70 py-2 text-xs font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition cursor-pointer"
+            >
+              Continue in Local Single-User Mode
+            </button>
+          )}
         </form>
 
         <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500">
-          <span>Storage: %LOCALAPPDATA%\OutboundOS\data</span>
+          <span>Database: data/outboundos.sqlite</span>
           {isSetup && (
             <button
               type="button"

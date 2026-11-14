@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { Calendar, Clock, X, Check, Mail, Sliders, AlertCircle } from 'lucide-react';
+import { Calendar, X, AlertCircle } from 'lucide-react';
 import { Campaign, MailboxAccount } from '../../types';
+import { isProductionConnectedMailbox } from '../../utils/senderRotation';
 
 interface ScheduleCampaignModalProps {
   campaign: Campaign;
   mailboxes: MailboxAccount[];
+  workspaceTimezone?: string;
   onClose: () => void;
   onScheduled: (campaign: Campaign, message: string) => void;
 }
@@ -12,6 +14,7 @@ interface ScheduleCampaignModalProps {
 export const ScheduleCampaignModal: React.FC<ScheduleCampaignModalProps> = ({
   campaign,
   mailboxes,
+  workspaceTimezone,
   onClose,
   onScheduled,
 }) => {
@@ -19,7 +22,7 @@ export const ScheduleCampaignModal: React.FC<ScheduleCampaignModalProps> = ({
   const [startDate, setStartDate] = useState(campaign.schedule?.startDate || tomorrow);
   const [startTime, setStartTime] = useState(campaign.schedule?.startTime || '09:00');
   const [endTime, setEndTime] = useState(campaign.schedule?.endTime || '17:00');
-  const [timezone, setTimezone] = useState(campaign.schedule?.timezone || 'America/Los_Angeles');
+  const [timezone, setTimezone] = useState(campaign.schedule?.timezone || workspaceTimezone || 'America/Chicago');
   const [sendingDays, setSendingDays] = useState<number[]>(
     campaign.schedule?.sendingDays && campaign.schedule.sendingDays.length > 0
       ? campaign.schedule.sendingDays
@@ -29,13 +32,22 @@ export const ScheduleCampaignModal: React.FC<ScheduleCampaignModalProps> = ({
   const [minIntervalSeconds, setMinIntervalSeconds] = useState(
     campaign.schedule?.minIntervalSeconds || 90
   );
-  const [selectedMailboxIds, setSelectedMailboxIds] = useState<string[]>(
-    campaign.mailboxAccountIds && campaign.mailboxAccountIds.length > 0
-      ? campaign.mailboxAccountIds
-      : mailboxes.filter((m) => m.status === 'connected').map((m) => m.id)
-  );
+  const [selectedMailboxIds, setSelectedMailboxIds] = useState<string[]>(() => {
+    if (campaign.mailboxAccountIds && campaign.mailboxAccountIds.length > 0) {
+      return campaign.mailboxAccountIds.filter((id) => {
+        const mb = mailboxes.find((m) => m.id === id);
+        return mb ? mb.status === 'connected' : false;
+      });
+    }
+    return mailboxes.filter(isProductionConnectedMailbox).map((m) => m.id);
+  });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const validSelectedCount = selectedMailboxIds.filter((id) => {
+    const mb = mailboxes.find((m) => m.id === id);
+    return mb?.status === 'connected';
+  }).length;
 
   const toggleDay = (day: number) => {
     if (sendingDays.includes(day)) {
@@ -46,11 +58,12 @@ export const ScheduleCampaignModal: React.FC<ScheduleCampaignModalProps> = ({
     }
   };
 
-  const toggleMailbox = (id: string) => {
-    if (selectedMailboxIds.includes(id)) {
-      setSelectedMailboxIds(selectedMailboxIds.filter((m) => m !== id));
+  const toggleMailbox = (mb: MailboxAccount) => {
+    if (mb.status !== 'connected') return;
+    if (selectedMailboxIds.includes(mb.id)) {
+      setSelectedMailboxIds(selectedMailboxIds.filter((m) => m !== mb.id));
     } else {
-      setSelectedMailboxIds([...selectedMailboxIds, id]);
+      setSelectedMailboxIds([...selectedMailboxIds, mb.id]);
     }
   };
 
@@ -65,6 +78,11 @@ export const ScheduleCampaignModal: React.FC<ScheduleCampaignModalProps> = ({
   ];
 
   const handleSaveSchedule = async () => {
+    if (validSelectedCount === 0) {
+      setError('Select at least one connected sending mailbox before scheduling.');
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
 
@@ -84,7 +102,7 @@ export const ScheduleCampaignModal: React.FC<ScheduleCampaignModalProps> = ({
             timezone,
             sendingDays,
             minIntervalSeconds,
-            useRecipientTimezone: true,
+            useRecipientTimezone: campaign.schedule?.useRecipientTimezone ?? true,
           },
           settings: {
             ...campaign.settings,
@@ -239,31 +257,63 @@ export const ScheduleCampaignModal: React.FC<ScheduleCampaignModalProps> = ({
 
           {/* Mailbox Selection */}
           <div>
-            <label className="block text-slate-300 font-medium mb-1.5">Assigned Sending Mailboxes</label>
-            <div className="space-y-1.5 max-h-32 overflow-y-auto rounded-lg bg-slate-950 p-2 border border-slate-800">
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-slate-300 font-medium">Assigned Sending Mailboxes</label>
+              <span className={`text-[10px] font-mono ${validSelectedCount > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {validSelectedCount} connected selected
+              </span>
+            </div>
+            <div className="space-y-1.5 max-h-40 overflow-y-auto rounded-lg bg-slate-950 p-2 border border-slate-800">
               {mailboxes.length === 0 ? (
                 <p className="text-slate-500 text-[11px] p-1">No mailboxes connected. Add one in Email Accounts.</p>
               ) : (
                 mailboxes.map((mb) => {
-                  const isChecked = selectedMailboxIds.includes(mb.id);
+                  const isConnected = mb.status === 'connected';
+                  const isChecked = isConnected && selectedMailboxIds.includes(mb.id);
                   return (
                     <label
                       key={mb.id}
-                      className="flex items-center gap-2 p-1.5 rounded hover:bg-slate-900 transition cursor-pointer text-[11px]"
+                      className={`flex items-center justify-between gap-2 p-1.5 rounded transition text-[11px] ${
+                        isConnected ? 'hover:bg-slate-900 cursor-pointer' : 'opacity-60 cursor-not-allowed'
+                      }`}
                     >
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => toggleMailbox(mb.id)}
-                        className="rounded border-slate-700 text-blue-600 focus:ring-0"
-                      />
-                      <span className="font-mono text-slate-200">{mb.email}</span>
-                      <span className="text-[10px] text-slate-500">({mb.provider})</span>
+                      <div className="flex items-center gap-2 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          disabled={!isConnected}
+                          onChange={() => toggleMailbox(mb)}
+                          className="rounded border-slate-700 text-blue-600 focus:ring-0 disabled:opacity-50"
+                        />
+                        <span className="font-mono text-slate-200 truncate">{mb.email}</span>
+                        <span className="text-[10px] text-slate-500 uppercase">({mb.provider})</span>
+                        {mb.isTestMailbox && (
+                          <span className="rounded bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.2 text-[9px] font-mono text-amber-300">
+                            TEST RIG
+                          </span>
+                        )}
+                      </div>
+                      <span
+                        className={`shrink-0 rounded px-1.5 py-0.2 text-[9px] font-mono uppercase ${
+                          mb.status === 'connected'
+                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            : mb.status === 'reauth_required'
+                            ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                            : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                        }`}
+                      >
+                        {mb.status === 'reauth_required' ? 'Re-auth Required' : mb.status}
+                      </span>
                     </label>
                   );
                 })
               )}
             </div>
+            {validSelectedCount === 0 && (
+              <p className="text-[11px] text-amber-300 mt-1.5">
+                No connected mailbox is selected. Connect or reconnect a sender in Email Accounts first.
+              </p>
+            )}
           </div>
 
           {/* Schedule Preview Summary */}
@@ -293,7 +343,7 @@ export const ScheduleCampaignModal: React.FC<ScheduleCampaignModalProps> = ({
           <button
             type="button"
             onClick={handleSaveSchedule}
-            disabled={isSubmitting}
+            disabled={isSubmitting || validSelectedCount === 0}
             className="flex items-center gap-1.5 px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-xs font-bold text-white shadow-lg shadow-blue-600/30 transition cursor-pointer"
           >
             <Calendar className="h-3.5 w-3.5" />

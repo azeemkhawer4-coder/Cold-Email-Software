@@ -29,7 +29,19 @@ interface BackupItem {
   createdAt: string;
 }
 
-export const SettingsPage: React.FC = () => {
+interface SettingsPageProps {
+  authStatus?: { isSetup: boolean; authenticated: boolean; user?: any } | null;
+  onRequireAuthSetup?: () => void;
+  onWorkspaceUpdated?: () => void;
+  onSignedOut?: () => void;
+}
+
+export const SettingsPage: React.FC<SettingsPageProps> = ({
+  authStatus,
+  onRequireAuthSetup,
+  onWorkspaceUpdated,
+  onSignedOut,
+}) => {
   const [workspace, setWorkspace] = useState<WorkspaceSettings | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -41,6 +53,8 @@ export const SettingsPage: React.FC = () => {
   const [integrityStatus, setIntegrityStatus] = useState<string | null>(null);
   const [isCheckingIntegrity, setIsCheckingIntegrity] = useState(false);
   const [storageStats, setStorageStats] = useState<any>(null);
+  const [backupToRestore, setBackupToRestore] = useState<string | null>(null);
+  const [restoreFeedback, setRestoreFeedback] = useState<{ ok: boolean; text: string } | null>(null);
 
   const fetchBackups = async () => {
     try {
@@ -67,7 +81,14 @@ export const SettingsPage: React.FC = () => {
   useEffect(() => {
     fetch('/api/workspace')
       .then((res) => res.json())
-      .then((data) => setWorkspace(data.workspace))
+      .then((data) => {
+        if (data.workspace) {
+          setWorkspace({
+            ...data.workspace,
+            timezone: data.workspace.timezone || 'America/Chicago',
+          });
+        }
+      })
       .catch((err) => console.error(err));
 
     fetchBackups();
@@ -79,13 +100,16 @@ export const SettingsPage: React.FC = () => {
     if (!workspace) return;
     setIsSaving(true);
     try {
-      await fetch('/api/workspace', {
+      const res = await fetch('/api/workspace', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(workspace),
       });
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
+      if (res.ok) {
+        setSaveSuccess(true);
+        onWorkspaceUpdated?.();
+        setTimeout(() => setSaveSuccess(false), 3000);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -126,10 +150,10 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleRestoreBackup = async (filename: string) => {
-    if (!window.confirm(`Are you sure you want to restore from ${filename}? Active database will be safely replaced with this snapshot.`)) {
-      return;
-    }
+  const confirmRestoreBackup = async () => {
+    if (!backupToRestore) return;
+    const filename = backupToRestore;
+    setBackupToRestore(null);
     try {
       const res = await fetch('/api/database/restore', {
         method: 'POST',
@@ -138,20 +162,24 @@ export const SettingsPage: React.FC = () => {
       });
       const data = await res.json();
       if (data.success) {
-        alert(data.message);
-        window.location.reload();
+        setRestoreFeedback({ ok: true, text: data.message || 'Database restored successfully. Reloading...' });
+        setTimeout(() => window.location.reload(), 1000);
       } else {
-        alert(`Restore failed: ${data.message}`);
+        setRestoreFeedback({ ok: false, text: `Restore failed: ${data.message || 'Unknown error'}` });
       }
     } catch (err: any) {
-      alert(`Restore failed: ${err.message}`);
+      setRestoreFeedback({ ok: false, text: `Restore failed: ${err.message}` });
     }
   };
 
   const handleLogout = async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
-      window.location.reload();
+      if (onSignedOut) {
+        onSignedOut();
+      } else {
+        window.location.reload();
+      }
     } catch (err) {
       console.error(err);
     }
@@ -162,9 +190,9 @@ export const SettingsPage: React.FC = () => {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-[#070b14] text-slate-100 p-6 space-y-6 custom-scrollbar max-w-4xl">
+    <div className="flex-1 overflow-y-auto bg-[#070b14] text-slate-100 p-6 space-y-6 custom-scrollbar">
       {/* Top Header */}
-      <div className="flex items-center justify-between border-b border-slate-800/80 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
             Workspace Settings & Local Database
@@ -174,21 +202,52 @@ export const SettingsPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           {saveSuccess && (
             <span className="flex items-center gap-1.5 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-3 py-1.5 rounded-lg animate-fade-in font-medium">
               <Check className="h-4 w-4" /> Settings Saved
             </span>
           )}
-          <button
-            onClick={handleLogout}
-            className="rounded-lg bg-slate-800/80 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition cursor-pointer"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-            Sign Out Local Session
-          </button>
+          {authStatus?.isSetup ? (
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="rounded-lg bg-slate-800/80 hover:bg-slate-700 border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Sign Out Local Session
+            </button>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="rounded-lg bg-slate-900 border border-slate-800 px-2.5 py-1.5 text-[11px] font-mono text-slate-400">
+                Local Single-User Mode
+              </span>
+              {onRequireAuthSetup && (
+                <button
+                  type="button"
+                  onClick={onRequireAuthSetup}
+                  className="rounded-lg bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/40 px-3 py-1.5 text-xs font-medium text-blue-300 flex items-center gap-1.5 transition cursor-pointer"
+                >
+                  <Lock className="h-3.5 w-3.5" />
+                  Enable Password Lock
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
+
+      {restoreFeedback && (
+        <div
+          className={`p-3 rounded-lg text-xs border ${
+            restoreFeedback.ok
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+              : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+          }`}
+        >
+          {restoreFeedback.text}
+        </div>
+      )}
 
       <form onSubmit={handleSave} className="space-y-6 text-xs">
         {/* Workspace Profile */}
@@ -198,7 +257,7 @@ export const SettingsPage: React.FC = () => {
             Organization & Workspace Details
           </h3>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-slate-400 mb-1">Workspace Display Name</label>
               <input
@@ -220,7 +279,7 @@ export const SettingsPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-slate-400 mb-1">Primary Owner Email</label>
               <input
@@ -259,7 +318,7 @@ export const SettingsPage: React.FC = () => {
                 Local SQLite Database & Automated Backup System
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                OutboundOS operates locally with zero cloud dependencies. Your database is stored outside source control in local application data.
+                OutboundOS operates locally with zero cloud dependencies. All data persists locally in ACID WAL SQLite.
               </p>
             </div>
 
@@ -306,8 +365,8 @@ export const SettingsPage: React.FC = () => {
               <span className="text-emerald-400 font-bold">better-sqlite3 (WAL Mode & Foreign Keys ON)</span>
             </div>
             <div className="flex justify-between items-center text-slate-300">
-              <span className="text-slate-500">Windows Storage Path:</span>
-              <span className="text-slate-200 truncate max-w-md">{storageStats?.path || '%LOCALAPPDATA%\\OutboundOS\\data\\outboundos.sqlite'}</span>
+              <span className="text-slate-500">Storage Path:</span>
+              <span className="text-slate-200 truncate max-w-md">{storageStats?.path || 'data/outboundos.sqlite'}</span>
             </div>
             <div className="flex justify-between items-center text-slate-300">
               <span className="text-slate-500">Secret Encryption Key:</span>
@@ -341,7 +400,7 @@ export const SettingsPage: React.FC = () => {
                       <td className="py-2 px-3 text-right">
                         <button
                           type="button"
-                          onClick={() => handleRestoreBackup(b.filename)}
+                          onClick={() => setBackupToRestore(b.filename)}
                           className="text-blue-400 hover:text-blue-300 text-xs font-semibold cursor-pointer underline"
                         >
                           Restore
@@ -414,6 +473,34 @@ export const SettingsPage: React.FC = () => {
           </button>
         </div>
       </form>
+
+      {/* Restore Confirmation Modal */}
+      {backupToRestore && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-xs p-4">
+          <div className="surface-card rounded-2xl border border-slate-700 p-6 max-w-sm w-full space-y-4 shadow-2xl">
+            <h3 className="text-base font-bold text-white">Restore SQLite Backup?</h3>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Are you sure you want to restore from <span className="font-mono text-amber-300">{backupToRestore}</span>? The active database will be replaced with this snapshot.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setBackupToRestore(null)}
+                className="px-3.5 py-1.5 rounded-lg border border-slate-700 text-xs text-slate-300 hover:bg-slate-800 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmRestoreBackup}
+                className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white cursor-pointer"
+              >
+                Restore Snapshot
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

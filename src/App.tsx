@@ -17,7 +17,20 @@ import { AutomationsPage } from './pages/AutomationsPage';
 import { AiAssistantPage } from './pages/AiAssistantPage';
 import { IntegrationsPage } from './pages/IntegrationsPage';
 import { SettingsPage } from './pages/SettingsPage';
-import { Lead, LeadList, Campaign, MailboxAccount, Conversation, Deal, Automation } from './types';
+import {
+  Lead,
+  LeadList,
+  Campaign,
+  MailboxAccount,
+  Conversation,
+  Deal,
+  Automation,
+  SendingJob,
+  WorkspaceSettings,
+  ZeroCostStatus,
+} from './types';
+
+const LOCAL_UNLOCK_KEY = 'outboundos_local_unlocked';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<NavigationItem>('dashboard');
@@ -25,6 +38,7 @@ export default function App() {
   const [isSimulateModalOpen, setIsSimulateModalOpen] = useState(false);
   const [openCreateCampaignWizard, setOpenCreateCampaignWizard] = useState(false);
   const [selectedConversationId, setSelectedConversationId] = useState<string | undefined>(undefined);
+  const [selectedLeadListFilter, setSelectedLeadListFilter] = useState<string | undefined>(undefined);
   const [isWorkerRunning, setIsWorkerRunning] = useState(false);
 
   // Core Data States
@@ -35,19 +49,57 @@ export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [automations, setAutomations] = useState<Automation[]>([]);
+  const [sendingJobs, setSendingJobs] = useState<SendingJob[]>([]);
+  const [workerStatus, setWorkerStatus] = useState<{ isRunning: boolean; sendingActive: boolean } | null>(null);
+  const [workspace, setWorkspace] = useState<WorkspaceSettings | null>(null);
+  const [budgetStatus, setBudgetStatus] = useState<ZeroCostStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Auth Gate State
+  const [authStatus, setAuthStatus] = useState<{ isSetup: boolean; authenticated: boolean; user?: any } | null>(null);
+  const [localUnlocked, setLocalUnlocked] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(LOCAL_UNLOCK_KEY) === 'true';
+  });
+  const [forceAuthSetup, setForceAuthSetup] = useState(false);
 
   const fetchAllData = useCallback(async () => {
     try {
-      const [leadsRes, listsRes, campsRes, mailboxesRes, inboxRes, crmRes, autoRes] = await Promise.all([
-        fetch('/api/leads').then((r) => r.json()),
-        fetch('/api/lists').then((r) => r.json()),
-        fetch('/api/campaigns').then((r) => r.json()),
-        fetch('/api/mailboxes').then((r) => r.json()),
-        fetch('/api/inbox').then((r) => r.json()),
-        fetch('/api/crm/deals').then((r) => r.json()),
-        fetch('/api/automations').then((r) => r.json()),
+      const responses = await Promise.all([
+        fetch('/api/leads'),
+        fetch('/api/lists'),
+        fetch('/api/campaigns'),
+        fetch('/api/mailboxes'),
+        fetch('/api/inbox'),
+        fetch('/api/crm/deals'),
+        fetch('/api/automations'),
+        fetch('/api/queue'),
+        fetch('/api/worker/status'),
+        fetch('/api/workspace'),
+        fetch('/api/budget/status'),
       ]);
+
+      if (responses.some((r) => r.status === 401)) {
+        setAuthStatus((prev) => (prev ? { ...prev, authenticated: false } : { isSetup: true, authenticated: false }));
+        setIsLoading(false);
+        return;
+      }
+
+      const [
+        leadsRes,
+        listsRes,
+        campsRes,
+        mailboxesRes,
+        inboxRes,
+        crmRes,
+        autoRes,
+        queueRes,
+        workerRes,
+        workspaceRes,
+        budgetRes,
+      ] = await Promise.all(
+        responses.map((r) => (r.ok ? r.json().catch(() => ({})) : Promise.resolve({})))
+      );
 
       if (leadsRes.leads) setLeads(leadsRes.leads);
       if (listsRes.lists) setLists(listsRes.lists);
@@ -56,6 +108,15 @@ export default function App() {
       if (inboxRes.conversations) setConversations(inboxRes.conversations);
       if (crmRes.deals) setDeals(crmRes.deals);
       if (autoRes.automations) setAutomations(autoRes.automations);
+      if (queueRes.jobs) setSendingJobs(queueRes.jobs);
+      if (typeof workerRes.sendingActive === 'boolean') {
+        setWorkerStatus({
+          isRunning: Boolean(workerRes.isRunning),
+          sendingActive: workerRes.sendingActive,
+        });
+      }
+      if (workspaceRes.workspace) setWorkspace(workspaceRes.workspace);
+      if (budgetRes && typeof budgetRes.monthlyOperatingCost === 'number') setBudgetStatus(budgetRes);
     } catch (err) {
       console.error('Failed to load OutboundOS data:', err);
     } finally {
@@ -63,26 +124,31 @@ export default function App() {
     }
   }, []);
 
-  const [authStatus, setAuthStatus] = useState<{ isSetup: boolean; authenticated: boolean; user?: any } | null>(null);
-
   const checkAuth = useCallback(async () => {
     try {
       const res = await fetch('/api/auth/status');
       if (res.ok) {
         const data = await res.json();
         setAuthStatus(data);
-        if (data.authenticated || !data.isSetup) {
+        const canAccess = data.isSetup ? data.authenticated : localUnlocked;
+        if (canAccess) {
           fetchAllData();
         } else {
           setIsLoading(false);
         }
       } else {
-        fetchAllData();
+        setAuthStatus({ isSetup: false, authenticated: false });
+        if (localUnlocked) {
+          fetchAllData();
+        } else {
+          setIsLoading(false);
+        }
       }
-    } catch (_) {
-      fetchAllData();
+    } catch {
+      setAuthStatus({ isSetup: false, authenticated: false });
+      setIsLoading(false);
     }
-  }, [fetchAllData]);
+  }, [fetchAllData, localUnlocked]);
 
   useEffect(() => {
     checkAuth();
@@ -102,11 +168,62 @@ export default function App() {
 
   const handleSearchGlobal = (query: string) => {
     if (!query) return;
-    // If user searches and is on a dashboard, switch to leads or inbox
     if (currentTab === 'dashboard') {
       setCurrentTab('leads');
     }
   };
+
+  const handleAuthSuccess = (user: any) => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(LOCAL_UNLOCK_KEY);
+    }
+    setLocalUnlocked(true);
+    setForceAuthSetup(false);
+    setAuthStatus({ isSetup: true, authenticated: true, user });
+    setIsLoading(true);
+    fetchAllData();
+  };
+
+  const handleContinueLocal = () => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(LOCAL_UNLOCK_KEY, 'true');
+    }
+    setLocalUnlocked(true);
+    setForceAuthSetup(false);
+    setIsLoading(true);
+    fetchAllData();
+  };
+
+  const handleSignedOut = () => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(LOCAL_UNLOCK_KEY);
+    }
+    setLocalUnlocked(false);
+    setForceAuthSetup(false);
+    setAuthStatus({ isSetup: true, authenticated: false });
+  };
+
+  // Show standalone loading gate while initial /api/auth/status is resolving
+  if (authStatus === null) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-[#070b14] text-slate-400 text-xs gap-2">
+        <span className="h-4 w-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
+        <span>Verifying OutboundOS Local Session...</span>
+      </div>
+    );
+  }
+
+  // Standalone Auth Gate: never render Sidebar/Header/Dashboard data underneath when gated
+  const needsAuthGate = forceAuthSetup || (authStatus.isSetup ? !authStatus.authenticated : !localUnlocked);
+  if (needsAuthGate) {
+    return (
+      <LocalAuthModal
+        isSetup={forceAuthSetup ? false : authStatus.isSetup}
+        onAuthSuccess={handleAuthSuccess}
+        onContinueLocal={!authStatus.isSetup ? handleContinueLocal : undefined}
+      />
+    );
+  }
 
   const unreadCount = conversations.filter((c) => c.status === 'unread').length;
 
@@ -123,6 +240,8 @@ export default function App() {
           setCurrentTab('campaigns');
           setOpenCreateCampaignWizard(true);
         }}
+        workspace={workspace}
+        currentUser={authStatus.user || null}
       />
 
       {/* Main Content Area */}
@@ -133,6 +252,8 @@ export default function App() {
           onOpenSimulateModal={() => setIsSimulateModalOpen(true)}
           isWorkerRunning={isWorkerRunning}
           onTriggerWorker={handleTriggerWorker}
+          mailboxes={mailboxes}
+          workerStatus={workerStatus}
         />
 
         <main className="flex-1 flex overflow-hidden relative">
@@ -149,7 +270,10 @@ export default function App() {
                   campaigns={campaigns}
                   mailboxes={mailboxes}
                   conversations={conversations}
-                  onSelectCampaign={(id) => {
+                  sendingJobs={sendingJobs}
+                  deals={deals}
+                  workerStatus={workerStatus}
+                  onSelectCampaign={() => {
                     setCurrentTab('campaigns');
                   }}
                   onOpenConversation={(id) => {
@@ -160,6 +284,7 @@ export default function App() {
                     setCurrentTab('campaigns');
                     setOpenCreateCampaignWizard(true);
                   }}
+                  onNavigateTab={(tab) => setCurrentTab(tab)}
                 />
               )}
 
@@ -167,6 +292,8 @@ export default function App() {
                 <LeadsPage
                   leads={leads}
                   lists={lists}
+                  selectedListId={selectedLeadListFilter}
+                  onClearListFilter={() => setSelectedLeadListFilter(undefined)}
                   onRefreshLeads={fetchAllData}
                 />
               )}
@@ -174,8 +301,10 @@ export default function App() {
               {currentTab === 'lists' && (
                 <ListsPage
                   lists={lists}
+                  leads={leads}
                   onRefreshLists={fetchAllData}
                   onSelectList={(listId) => {
+                    setSelectedLeadListFilter(listId);
                     setCurrentTab('leads');
                   }}
                 />
@@ -187,7 +316,11 @@ export default function App() {
                   lists={lists}
                   mailboxes={mailboxes}
                   leads={leads}
+                  workspace={workspace}
+                  workerStatus={workerStatus}
                   onRefreshCampaigns={fetchAllData}
+                  onNavigateToMailboxes={() => setCurrentTab('mailboxes')}
+                  onNavigateToDeliverability={() => setCurrentTab('deliverability')}
                   openCreateWizard={openCreateCampaignWizard}
                   onCloseCreateWizard={() => setOpenCreateCampaignWizard(false)}
                 />
@@ -208,12 +341,18 @@ export default function App() {
                 />
               )}
 
-              {currentTab === 'deliverability' && <DeliverabilityPage />}
+              {currentTab === 'deliverability' && (
+                <DeliverabilityPage
+                  campaigns={campaigns}
+                  onRefreshAll={fetchAllData}
+                />
+              )}
 
               {currentTab === 'warmup' && (
                 <WarmupPage
                   mailboxes={mailboxes}
                   onRefreshMailboxes={fetchAllData}
+                  onNavigateToDeliverability={() => setCurrentTab('deliverability')}
                 />
               )}
 
@@ -221,6 +360,10 @@ export default function App() {
                 <AnalyticsPage
                   campaigns={campaigns}
                   mailboxes={mailboxes}
+                  leads={leads}
+                  conversations={conversations}
+                  sendingJobs={sendingJobs}
+                  deals={deals}
                 />
               )}
 
@@ -239,13 +382,24 @@ export default function App() {
                 />
               )}
 
-              {currentTab === 'ai' && <AiAssistantPage />}
+              {currentTab === 'ai' && <AiAssistantPage budgetStatus={budgetStatus} />}
 
               {currentTab === 'integrations' && (
-                <IntegrationsPage onRefreshAll={fetchAllData} />
+                <IntegrationsPage
+                  mailboxes={mailboxes}
+                  budgetStatus={budgetStatus}
+                  onRefreshAll={fetchAllData}
+                />
               )}
 
-              {currentTab === 'settings' && <SettingsPage />}
+              {currentTab === 'settings' && (
+                <SettingsPage
+                  authStatus={authStatus}
+                  onRequireAuthSetup={() => setForceAuthSetup(true)}
+                  onWorkspaceUpdated={fetchAllData}
+                  onSignedOut={handleSignedOut}
+                />
+              )}
             </>
           )}
         </main>
@@ -258,17 +412,6 @@ export default function App() {
         leads={leads}
         onReplySimulated={fetchAllData}
       />
-
-      {/* Local Administrator Setup & Authentication Modal */}
-      {authStatus && (!authStatus.isSetup || !authStatus.authenticated) && (
-        <LocalAuthModal
-          isSetup={authStatus.isSetup}
-          onAuthSuccess={(user) => {
-            setAuthStatus({ isSetup: true, authenticated: true, user });
-            fetchAllData();
-          }}
-        />
-      )}
     </div>
   );
 }

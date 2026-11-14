@@ -61,7 +61,7 @@ export const migrations: Migration[] = [
           name TEXT NOT NULL,
           company_name TEXT,
           owner_email TEXT,
-          timezone TEXT DEFAULT 'America/Los_Angeles',
+          timezone TEXT DEFAULT 'America/Chicago',
           physical_address TEXT,
           unsubscribe_footer TEXT,
           compliance_mode TEXT DEFAULT 'strict',

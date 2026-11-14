@@ -1,22 +1,31 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldAlert, Pause, Trash2, Power, AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
+import { ShieldAlert, Pause, Trash2, Power, AlertTriangle } from 'lucide-react';
+
+interface WorkerStatus {
+  isRunning: boolean;
+  sendingActive: boolean;
+}
 
 interface SafetyControlBarProps {
   onRefresh: () => void;
+  onStatusChange?: (status: WorkerStatus) => void;
 }
 
-export const SafetyControlBar: React.FC<SafetyControlBarProps> = ({ onRefresh }) => {
-  const [workerStatus, setWorkerStatus] = useState<{ isRunning: boolean; sendingActive: boolean } | null>(null);
+export const SafetyControlBar: React.FC<SafetyControlBarProps> = ({ onRefresh, onStatusChange }) => {
+  const [workerStatus, setWorkerStatus] = useState<WorkerStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [showKillModal, setShowKillModal] = useState(false);
-  const [actionFeedback, setActionFeedback] = useState<string | null>(null);
+  const [showClearModal, setShowClearModal] = useState(false);
+  const [actionFeedback, setActionFeedback] = useState<{ text: string; isError?: boolean } | null>(null);
 
   const fetchStatus = async () => {
     try {
       const res = await fetch('/api/worker/status');
       if (res.ok) {
         const data = await res.json();
-        setWorkerStatus({ isRunning: data.isRunning, sendingActive: data.sendingActive });
+        const nextStatus = { isRunning: Boolean(data.isRunning), sendingActive: Boolean(data.sendingActive) };
+        setWorkerStatus(nextStatus);
+        onStatusChange?.(nextStatus);
       }
     } catch (_) {}
   };
@@ -27,17 +36,31 @@ export const SafetyControlBar: React.FC<SafetyControlBarProps> = ({ onRefresh })
     return () => clearInterval(interval);
   }, []);
 
+  const showNotice = (text: string, isError = false, timeout = 4000) => {
+    setActionFeedback({ text, isError });
+    setTimeout(() => setActionFeedback(null), timeout);
+  };
+
   const handleToggleWorker = async () => {
     setLoading(true);
     try {
       const res = await fetch('/api/worker/toggle', { method: 'POST' });
-      const data = await res.json();
-      setWorkerStatus((prev) => prev ? { ...prev, sendingActive: data.sendingActive } : null);
-      setActionFeedback(data.message);
-      setTimeout(() => setActionFeedback(null), 4000);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showNotice(data.error || 'Failed to toggle worker dispatch', true);
+        return;
+      }
+      setWorkerStatus((prev) => {
+        const next = prev
+          ? { ...prev, sendingActive: Boolean(data.sendingActive) }
+          : { isRunning: true, sendingActive: Boolean(data.sendingActive) };
+        onStatusChange?.(next);
+        return next;
+      });
+      showNotice(data.message || (data.sendingActive ? 'Worker Dispatch resumed' : 'Worker Dispatch paused'));
       onRefresh();
     } catch (e: any) {
-      console.error(e);
+      showNotice(e?.message || 'Failed to toggle worker', true);
     } finally {
       setLoading(false);
     }
@@ -48,13 +71,16 @@ export const SafetyControlBar: React.FC<SafetyControlBarProps> = ({ onRefresh })
     setShowKillModal(false);
     try {
       const res = await fetch('/api/queue/kill-switch', { method: 'POST' });
-      const data = await res.json();
-      setActionFeedback(data.message);
-      setTimeout(() => setActionFeedback(null), 5000);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showNotice(data.error || 'Kill switch request failed', true);
+        return;
+      }
+      showNotice(data.message || 'Emergency kill switch engaged', false, 5000);
       await fetchStatus();
       onRefresh();
     } catch (e: any) {
-      console.error(e);
+      showNotice(e?.message || 'Kill switch failed', true);
     } finally {
       setLoading(false);
     }
@@ -64,28 +90,34 @@ export const SafetyControlBar: React.FC<SafetyControlBarProps> = ({ onRefresh })
     setLoading(true);
     try {
       const res = await fetch('/api/queue/pause-all', { method: 'POST' });
-      const data = await res.json();
-      setActionFeedback(data.message);
-      setTimeout(() => setActionFeedback(null), 4000);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showNotice(data.error || 'Failed to pause campaigns', true);
+        return;
+      }
+      showNotice(data.message || 'All active campaigns paused');
       onRefresh();
     } catch (e: any) {
-      console.error(e);
+      showNotice(e?.message || 'Failed to pause campaigns', true);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleClearQueue = async () => {
-    if (!window.confirm('Are you sure you want to cancel all pending jobs in the sending queue?')) return;
+  const handleClearQueueConfirmed = async () => {
     setLoading(true);
+    setShowClearModal(false);
     try {
       const res = await fetch('/api/queue/clear-pending', { method: 'POST' });
-      const data = await res.json();
-      setActionFeedback(data.message);
-      setTimeout(() => setActionFeedback(null), 4000);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        showNotice(data.error || 'Failed to clear queue', true);
+        return;
+      }
+      showNotice(data.message || 'Pending queue jobs cancelled');
       onRefresh();
     } catch (e: any) {
-      console.error(e);
+      showNotice(e?.message || 'Failed to clear queue', true);
     } finally {
       setLoading(false);
     }
@@ -109,24 +141,30 @@ export const SafetyControlBar: React.FC<SafetyControlBarProps> = ({ onRefresh })
           <span className="font-semibold text-slate-200">
             Worker Dispatch:{' '}
             <span className={workerStatus?.sendingActive ? 'text-emerald-400 font-mono' : 'text-amber-400 font-mono'}>
-              {workerStatus?.sendingActive ? 'Active (Live Sending)' : 'Standby / Paused'}
+              {workerStatus?.sendingActive ? 'Running' : 'Paused'}
             </span>
           </span>
         </div>
 
         {actionFeedback && (
-          <span className="rounded bg-slate-900 border border-slate-700 px-2.5 py-0.5 text-[11px] text-blue-300 font-mono animate-in fade-in">
-            {actionFeedback}
+          <span
+            className={`rounded border px-2.5 py-0.5 text-[11px] font-mono animate-in fade-in ${
+              actionFeedback.isError
+                ? 'bg-rose-950/60 border-rose-500/40 text-rose-300'
+                : 'bg-slate-900 border-slate-700 text-blue-300'
+            }`}
+          >
+            {actionFeedback.text}
           </span>
         )}
       </div>
 
       {/* Right: Emergency & Pause Controls */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <button
           onClick={handleToggleWorker}
           disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 transition font-medium cursor-pointer"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 transition font-medium cursor-pointer disabled:opacity-50"
           title="Toggle sending loop active state"
         >
           <Power className="h-3.5 w-3.5 text-slate-400" />
@@ -136,7 +174,7 @@ export const SafetyControlBar: React.FC<SafetyControlBarProps> = ({ onRefresh })
         <button
           onClick={handlePauseAll}
           disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 transition font-medium cursor-pointer"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-200 transition font-medium cursor-pointer disabled:opacity-50"
           title="Pause all active & scheduled campaigns"
         >
           <Pause className="h-3.5 w-3.5 text-amber-400" />
@@ -144,9 +182,9 @@ export const SafetyControlBar: React.FC<SafetyControlBarProps> = ({ onRefresh })
         </button>
 
         <button
-          onClick={handleClearQueue}
+          onClick={() => setShowClearModal(true)}
           disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 transition font-medium cursor-pointer"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 transition font-medium cursor-pointer disabled:opacity-50"
           title="Cancel pending jobs in the queue"
         >
           <Trash2 className="h-3.5 w-3.5 text-slate-400" />
@@ -156,13 +194,51 @@ export const SafetyControlBar: React.FC<SafetyControlBarProps> = ({ onRefresh })
         <button
           onClick={() => setShowKillModal(true)}
           disabled={loading}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-300 font-bold transition shadow-xs cursor-pointer"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 border border-rose-500/40 text-rose-300 font-bold transition shadow-xs cursor-pointer disabled:opacity-50"
           title="Global Emergency Kill Switch: immediately halts all sending, pauses campaigns, and clears queue"
         >
           <ShieldAlert className="h-3.5 w-3.5 text-rose-400" />
           <span>Emergency Kill Switch</span>
         </button>
       </div>
+
+      {/* CLEAR QUEUE CONFIRMATION MODAL */}
+      {showClearModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4 animate-in fade-in">
+          <div className="surface-card rounded-2xl border border-amber-500/40 p-6 max-w-md w-full space-y-4 shadow-2xl text-slate-100">
+            <div className="flex items-center gap-3 text-amber-400">
+              <div className="h-10 w-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white">Clear Pending Queue?</h3>
+                <p className="text-xs text-amber-300">Cancels queued and retrying jobs</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Are you sure you want to cancel all pending jobs currently waiting in the durable sending queue? Previously delivered logs will remain intact.
+            </p>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowClearModal(false)}
+                className="px-4 py-2 rounded-lg border border-slate-700 text-xs font-medium text-slate-300 hover:bg-slate-800 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleClearQueueConfirmed}
+                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-xs font-bold text-white transition cursor-pointer"
+              >
+                Confirm Clear Queue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* KILL SWITCH CONFIRMATION MODAL */}
       {showKillModal && (

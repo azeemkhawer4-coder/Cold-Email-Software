@@ -75,7 +75,7 @@ export const CrmPage: React.FC<CrmPageProps> = ({ deals, leads, onRefreshDeals }
   useEffect(() => {
     fetchCompanies();
     fetchTasks();
-  }, []);
+  }, [deals, leads]);
 
   const totalPipelineValue = deals
     .filter((d) => d.stage !== 'lost')

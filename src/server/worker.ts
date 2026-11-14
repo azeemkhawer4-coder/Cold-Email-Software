@@ -307,6 +307,7 @@ export async function syncAllMailboxReplies(): Promise<{ syncedCount: number; er
   const errors: string[] = [];
 
   for (const mailbox of db.mailboxes) {
+    if (mailbox.status === 'sync_completed') mailbox.status = 'connected';
     if (mailbox.status !== 'connected') continue;
 
     try {
@@ -321,6 +322,9 @@ export async function syncAllMailboxReplies(): Promise<{ syncedCount: number; er
       }
 
       mailbox.lastSyncAt = new Date().toISOString();
+      if ((mailbox.status as string) === 'sync_completed') {
+        mailbox.status = 'connected';
+      }
 
       for (const msg of inboundMsgs) {
         const lead = db.leads.find((l) => l.email.toLowerCase() === msg.senderEmail.toLowerCase());
@@ -414,7 +418,7 @@ export async function syncAllMailboxReplies(): Promise<{ syncedCount: number; er
     }
   }
 
-  if (syncedCount > 0) {
+  if (syncedCount > 0 || db.mailboxes.some((m) => m.status === 'reauth_required' || m.status === 'temporary_error')) {
     saveDatabase(db);
   }
 
@@ -643,17 +647,6 @@ export function simulateInboundReply(
     timestamp: now,
     isInbound: true,
   });
-
-  // Update campaign stats
-  if (lead.campaignId) {
-    const campaign = db.campaigns.find((c) => c.id === lead.campaignId);
-    if (campaign) {
-      campaign.stats.replied++;
-      if (sentiment === 'interested') {
-        campaign.stats.positiveReplies++;
-      }
-    }
-  }
 
   // Execute matching automations
   for (const auto of db.automations) {

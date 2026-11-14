@@ -9,6 +9,10 @@ export type RotatableMailbox = Pick<
 > &
   Partial<MailboxAccount>;
 
+export function isProductionConnectedMailbox<T extends RotatableMailbox>(mb: T): boolean {
+  return mb.status === 'connected' && !mb.isTestMailbox;
+}
+
 export function getEligibleMailboxes<T extends RotatableMailbox>(
   mailboxes: T[],
   allowedAccountIds?: string[]
@@ -17,11 +21,15 @@ export function getEligibleMailboxes<T extends RotatableMailbox>(
     // If specific accounts are assigned to campaign, check membership
     if (allowedAccountIds && allowedAccountIds.length > 0) {
       if (!allowedAccountIds.includes(mb.id)) return false;
+    } else {
+      // Never auto-select test sandbox mailboxes when no explicit mailbox assignment is set
+      if (mb.isTestMailbox) return false;
     }
     // Must be active and connected
     if (mb.status !== 'connected') return false;
     // Must have remaining daily quota
-    if (mb.sentToday >= mb.dailyLimit) return false;
+    const limit = mb.dailyLimit ?? mb.dailyQuota ?? 0;
+    if ((mb.sentToday || 0) >= limit) return false;
     return true;
   });
 }

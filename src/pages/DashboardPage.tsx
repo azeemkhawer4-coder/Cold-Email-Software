@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   Users,
   Send,
-  CheckCircle,
   MessageSquare,
   ThumbsUp,
   AlertOctagon,
@@ -11,7 +10,9 @@ import {
   ArrowUpRight,
   TrendingUp,
   ShieldCheck,
-  Building,
+  Briefcase,
+  AlertTriangle,
+  DollarSign,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -21,19 +22,23 @@ import {
   YAxis,
   Tooltip,
   CartesianGrid,
-  BarChart,
-  Bar,
 } from 'recharts';
-import { Lead, Campaign, MailboxAccount, Conversation } from '../types';
+import { Lead, Campaign, MailboxAccount, Conversation, SendingJob, Deal } from '../types';
+import { computeAnalyticsSummary, isProductionMailboxConnected } from '../utils/analyticsStats';
+import { NavigationItem } from '../components/Sidebar';
 
 interface DashboardPageProps {
   leads: Lead[];
   campaigns: Campaign[];
   mailboxes: MailboxAccount[];
   conversations: Conversation[];
+  sendingJobs?: SendingJob[];
+  deals?: Deal[];
+  workerStatus?: { isRunning: boolean; sendingActive: boolean } | null;
   onSelectCampaign: (id: string) => void;
   onOpenConversation: (id: string) => void;
   onOpenCreateCampaign: () => void;
+  onNavigateTab?: (tab: NavigationItem) => void;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
@@ -41,41 +46,48 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   campaigns,
   mailboxes,
   conversations,
+  sendingJobs = [],
+  deals = [],
+  workerStatus,
   onSelectCampaign,
   onOpenConversation,
   onOpenCreateCampaign,
+  onNavigateTab,
 }) => {
   const [dateRange, setDateRange] = useState<'today' | '7d' | '30d' | '90d'>('7d');
 
-  // Defensive guards for array inputs
   const safeLeads = Array.isArray(leads) ? leads : [];
   const safeCampaigns = Array.isArray(campaigns) ? campaigns : [];
   const safeMailboxes = Array.isArray(mailboxes) ? mailboxes : [];
   const safeConversations = Array.isArray(conversations) ? conversations : [];
+  const safeJobs = Array.isArray(sendingJobs) ? sendingJobs : [];
+  const safeDeals = Array.isArray(deals) ? deals : [];
 
-  // Aggregated real metrics from database
-  const totalLeads = safeLeads.length;
-  const totalSent = safeCampaigns.reduce((acc, c) => acc + (c?.stats?.sent || c?.stats?.sentCount || 0), 0);
-  const totalDelivered = safeCampaigns.reduce((acc, c) => acc + (c?.stats?.delivered || c?.stats?.deliveredCount || 0), 0);
-  const totalReplies = safeCampaigns.reduce((acc, c) => acc + (c?.stats?.replied || c?.stats?.replyCount || 0), 0);
-  const positiveReplies = safeCampaigns.reduce((acc, c) => acc + (c?.stats?.positiveReplies || c?.stats?.interestedCount || 0), 0);
-  const totalBounced = safeCampaigns.reduce((acc, c) => acc + (c?.stats?.bounced || c?.stats?.bounceCount || 0), 0);
-  const totalMeetings = safeCampaigns.reduce((acc, c) => acc + (c?.stats?.meetingsBooked || c?.stats?.meetingCount || 0), 0);
-  const activeCampaignsCount = safeCampaigns.filter((c) => c?.status === 'active').length;
+  const summary = computeAnalyticsSummary({
+    leads: safeLeads,
+    campaigns: safeCampaigns,
+    mailboxes: safeMailboxes,
+    conversations: safeConversations,
+    sendingJobs: safeJobs,
+    deals: safeDeals,
+  });
 
-  const bounceRate = totalSent > 0 ? ((totalBounced / totalSent) * 100).toFixed(1) : '0.0';
-  const replyRate = totalDelivered > 0 ? ((totalReplies / totalDelivered) * 100).toFixed(1) : '0.0';
+  const verifiedPct =
+    summary.totalLeads > 0 ? Math.round((summary.verifiedLeads / summary.totalLeads) * 100) : 0;
 
-  // Dynamic chart data representing real recorded outbound velocity
-  const chartData = [
-    { day: 'Mon', sent: Math.round(totalSent * 0.12), delivered: Math.round(totalDelivered * 0.12), replies: totalReplies > 0 ? Math.round(totalReplies * 0.15) : 0 },
-    { day: 'Tue', sent: Math.round(totalSent * 0.18), delivered: Math.round(totalDelivered * 0.18), replies: totalReplies > 0 ? Math.round(totalReplies * 0.25) : 0 },
-    { day: 'Wed', sent: Math.round(totalSent * 0.22), delivered: Math.round(totalDelivered * 0.21), replies: totalReplies > 0 ? Math.round(totalReplies * 0.25) : 0 },
-    { day: 'Thu', sent: Math.round(totalSent * 0.25), delivered: Math.round(totalDelivered * 0.24), replies: totalReplies > 0 ? Math.round(totalReplies * 0.15) : 0 },
-    { day: 'Fri', sent: Math.round(totalSent * 0.15), delivered: Math.round(totalDelivered * 0.15), replies: totalReplies > 0 ? Math.round(totalReplies * 0.15) : 0 },
-    { day: 'Sat', sent: Math.round(totalSent * 0.04), delivered: Math.round(totalDelivered * 0.04), replies: totalReplies > 0 ? Math.round(totalReplies * 0.03) : 0 },
-    { day: 'Sun', sent: Math.round(totalSent * 0.04), delivered: Math.round(totalDelivered * 0.04), replies: totalReplies > 0 ? Math.round(totalReplies * 0.02) : 0 },
-  ];
+  const displayedSeries =
+    dateRange === 'today' ? summary.dailySeries.slice(-1) : summary.dailySeries;
+
+  const chartData = displayedSeries.map((pt) => ({
+    day: pt.label,
+    sent: pt.sent,
+    delivered: pt.delivered,
+    replies: pt.replied,
+  }));
+
+  const hasChartActivity = chartData.some((d) => d.sent > 0 || d.delivered > 0 || d.replies > 0);
+  const showWorkerPausedWarning =
+    summary.activeCampaignsCount > 0 && workerStatus && !workerStatus.sendingActive;
 
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar bg-[#070b14] text-slate-100">
@@ -112,6 +124,26 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         </div>
       </div>
 
+      {/* Active Campaign While Worker Paused Warning */}
+      {showWorkerPausedWarning && (
+        <div className="rounded-xl bg-amber-950/40 border border-amber-600/50 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5 text-amber-200">
+            <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
+            <span>
+              <strong>{summary.activeCampaignsCount} active campaign(s)</strong> exist, but background queue dispatching is currently <strong>Paused</strong>. Queued jobs will not send until resumed.
+            </span>
+          </div>
+          {onNavigateTab && (
+            <button
+              onClick={() => onNavigateTab('deliverability')}
+              className="rounded-lg bg-amber-600 hover:bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white transition cursor-pointer shrink-0"
+            >
+              Inspect Queue & Worker
+            </button>
+          )}
+        </div>
+      )}
+
       {/* KPI Cards Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5">
         <div className="surface-card surface-card-hover rounded-xl p-4 transition-all duration-150">
@@ -119,12 +151,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <span className="text-xs font-medium">Total Leads</span>
             <Users className="h-4 w-4 text-blue-400" />
           </div>
-          <div className="mt-2 text-2xl font-bold tracking-tight text-white font-mono tabular-nums">{totalLeads}</div>
+          <div className="mt-2 text-2xl font-bold tracking-tight text-white font-mono tabular-nums">
+            {summary.totalLeads}
+          </div>
           <div className="mt-1 flex items-center text-[11px] text-slate-400">
-            <span className="text-emerald-400 flex items-center mr-1 font-mono">
-              <TrendingUp className="h-3 w-3 inline mr-0.5" /> 100%
+            <span className="text-emerald-400 flex items-center mr-1 font-mono tabular-nums">
+              <TrendingUp className="h-3 w-3 inline mr-0.5" /> {verifiedPct}%
             </span>
-            verified
+            <span>({summary.verifiedLeads} verified)</span>
           </div>
         </div>
 
@@ -133,9 +167,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <span className="text-xs font-medium">Emails Sent</span>
             <Send className="h-4 w-4 text-cyan-400" />
           </div>
-          <div className="mt-2 text-2xl font-bold tracking-tight text-white font-mono tabular-nums">{totalSent}</div>
+          <div className="mt-2 text-2xl font-bold tracking-tight text-white font-mono tabular-nums">
+            {summary.totalSent}
+          </div>
           <div className="mt-1 text-[11px] text-slate-400">
-            <span className="text-cyan-400 font-mono font-medium">{totalDelivered}</span> accepted
+            <span className="text-cyan-400 font-mono font-medium">{summary.totalDelivered}</span> accepted
           </div>
         </div>
 
@@ -144,9 +180,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <span className="text-xs font-medium">Reply Rate</span>
             <MessageSquare className="h-4 w-4 text-indigo-400" />
           </div>
-          <div className="mt-2 text-2xl font-bold tracking-tight text-white font-mono tabular-nums">{replyRate}%</div>
+          <div className="mt-2 text-2xl font-bold tracking-tight text-white font-mono tabular-nums">
+            {summary.replyRate.toFixed(1)}%
+          </div>
           <div className="mt-1 text-[11px] text-slate-400">
-            <span className="text-indigo-400 font-mono font-medium">{totalReplies}</span> total replies
+            <span className="text-indigo-400 font-mono font-medium">{summary.totalReplies}</span> total replies
           </div>
         </div>
 
@@ -155,9 +193,17 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <span className="text-xs font-medium">Positive Replies</span>
             <ThumbsUp className="h-4 w-4 text-emerald-400" />
           </div>
-          <div className="mt-2 text-2xl font-bold tracking-tight text-white font-mono tabular-nums">{positiveReplies}</div>
+          <div className="mt-2 text-2xl font-bold tracking-tight text-white font-mono tabular-nums">
+            {summary.positiveReplies}
+          </div>
           <div className="mt-1 text-[11px] text-slate-400">
-            <span className="text-emerald-400 font-mono font-medium">{Math.round((positiveReplies / Math.max(1, totalReplies)) * 100)}%</span> positive ratio
+            <span className="text-emerald-400 font-mono font-medium">
+              {summary.totalReplies > 0
+                ? Math.round((summary.positiveReplies / summary.totalReplies) * 100)
+                : 0}
+              %
+            </span>{' '}
+            positive ratio
           </div>
         </div>
 
@@ -166,8 +212,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <span className="text-xs font-medium">Meetings Booked</span>
             <CalendarCheck className="h-4 w-4 text-amber-400" />
           </div>
-          <div className="mt-2 text-2xl font-bold tracking-tight text-white font-mono tabular-nums">{totalMeetings}</div>
-          <div className="mt-1 text-[11px] text-slate-400">High-intent pipeline</div>
+          <div className="mt-2 text-2xl font-bold tracking-tight text-white font-mono tabular-nums">
+            {summary.totalMeetings}
+          </div>
+          <div className="mt-1 text-[11px] text-slate-400">
+            {summary.openDealsCount} open deal(s)
+          </div>
         </div>
 
         <div className="surface-card surface-card-hover rounded-xl p-4 transition-all duration-150">
@@ -175,8 +225,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <span className="text-xs font-medium">Bounce Rate</span>
             <AlertOctagon className="h-4 w-4 text-rose-400" />
           </div>
-          <div className="mt-2 text-2xl font-bold tracking-tight text-white font-mono tabular-nums">{bounceRate}%</div>
-          <div className="mt-1 text-[11px] text-emerald-400 font-mono">Below 2.0% safe threshold</div>
+          <div className="mt-2 text-2xl font-bold tracking-tight text-white font-mono tabular-nums">
+            {summary.bounceRate.toFixed(1)}%
+          </div>
+          <div
+            className={`mt-1 text-[11px] font-mono ${
+              summary.bounceRate <= 2.0 ? 'text-emerald-400' : 'text-rose-400'
+            }`}
+          >
+            {summary.bounceRate <= 2.0 ? 'Below 2.0% safe threshold' : 'Above 2.0% threshold'}
+          </div>
         </div>
       </div>
 
@@ -187,7 +245,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="text-sm font-semibold text-white">Outbound Sending & Delivery Performance</h3>
-              <p className="text-xs text-slate-400">Daily accepted dispatches across rotating sending mailboxes</p>
+              <p className="text-xs text-slate-400">
+                Real daily dispatches from recorded sending queue jobs (last 7 days)
+              </p>
             </div>
             <div className="flex items-center gap-3 text-xs">
               <span className="flex items-center gap-1.5 text-slate-300">
@@ -198,7 +258,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               </span>
             </div>
           </div>
-          <div className="h-64 w-full">
+          <div className="h-64 w-full relative">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                 <defs>
@@ -213,14 +273,40 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" opacity={0.6} />
                 <XAxis dataKey="day" stroke="#64748b" fontSize={11} tickLine={false} />
-                <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
+                <YAxis stroke="#64748b" fontSize={11} tickLine={false} allowDecimals={false} />
                 <Tooltip
-                  contentStyle={{ backgroundColor: '#090d16', borderColor: '#334155', borderRadius: '8px', fontSize: '12px' }}
+                  contentStyle={{
+                    backgroundColor: '#090d16',
+                    borderColor: '#334155',
+                    borderRadius: '8px',
+                    fontSize: '12px',
+                  }}
                 />
-                <Area type="monotone" dataKey="sent" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#sentGrad)" />
-                <Area type="monotone" dataKey="delivered" stroke="#06b6d4" strokeWidth={2} fillOpacity={1} fill="url(#delivGrad)" />
+                <Area
+                  type="monotone"
+                  dataKey="sent"
+                  stroke="#3b82f6"
+                  strokeWidth={2}
+                  fillOpacity={1}
+                  fill="url(#sentGrad)"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="delivered"
+                  stroke="#06b6d4"
+                  strokeWidth={2}
+                  fillOpacity={1}
+                  fill="url(#delivGrad)"
+                />
               </AreaChart>
             </ResponsiveContainer>
+            {!hasChartActivity && (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <span className="rounded-lg bg-slate-900/90 border border-slate-800 px-3 py-1.5 text-[11px] text-slate-400 font-mono">
+                  No dispatches recorded in this date window yet
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -229,13 +315,33 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           <div>
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-semibold text-white">Sending Accounts Health</h3>
-              <span className="text-[11px] text-cyan-400 font-mono font-medium flex items-center gap-1">
-                <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
-                Rotation Active
+              <span
+                className={`text-[11px] font-mono font-medium flex items-center gap-1 ${
+                  summary.connectedProductionMailboxesCount > 0
+                    ? 'text-cyan-400'
+                    : summary.reauthRequiredMailboxesCount > 0
+                    ? 'text-rose-400'
+                    : 'text-amber-400'
+                }`}
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    summary.connectedProductionMailboxesCount > 0
+                      ? 'bg-cyan-400'
+                      : summary.reauthRequiredMailboxesCount > 0
+                      ? 'bg-rose-400'
+                      : 'bg-amber-400'
+                  }`}
+                />
+                {summary.connectedProductionMailboxesCount > 0
+                  ? `${summary.connectedProductionMailboxesCount} Prod Active`
+                  : summary.reauthRequiredMailboxesCount > 0
+                  ? `${summary.reauthRequiredMailboxesCount} Re-auth Req`
+                  : 'No Prod Senders'}
               </span>
             </div>
             <p className="text-xs text-slate-400 mb-4">
-              Real-time load balancing ensuring per-provider rate safety.
+              Live sender status and daily quota usage across configured mailboxes.
             </p>
 
             <div className="space-y-3">
@@ -243,20 +349,31 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 const limit = mb.dailyLimit || mb.dailyQuota || 50;
                 const sent = mb.sentToday || 0;
                 const usedPct = Math.min(100, Math.round((sent / Math.max(1, limit)) * 100));
-                const warmup = mb.warmupScore ?? 95;
-                const health = mb.healthScore ?? 98;
+                const warmup = mb.warmupScore ?? 0;
+                const health = mb.healthScore ?? 0;
+                const isProdOk = isProductionMailboxConnected(mb);
+                const dotColor = isProdOk
+                  ? 'bg-emerald-400'
+                  : mb.status === 'reauth_required' || mb.status === 'error'
+                  ? 'bg-rose-400'
+                  : 'bg-amber-400';
+
                 return (
                   <div key={mb.id} className="rounded-lg bg-slate-900/60 border border-slate-800 p-3">
-                    <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center justify-between text-xs gap-2">
                       <div className="flex items-center gap-2 truncate">
-                        <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                        <span className={`h-2 w-2 rounded-full shrink-0 ${dotColor}`} />
                         <span className="font-medium text-slate-200 truncate">{mb.email}</span>
+                        {mb.isTestMailbox && (
+                          <span className="rounded bg-indigo-950 border border-indigo-700/60 px-1 text-[9px] font-mono text-indigo-300 shrink-0">
+                            TEST
+                          </span>
+                        )}
                       </div>
-                      <span className="text-slate-400 font-mono text-[11px] tabular-nums">
+                      <span className="text-slate-400 font-mono text-[11px] tabular-nums shrink-0">
                         {sent} / {limit}
                       </span>
                     </div>
-                    {/* Progress Bar */}
                     <div className="mt-2 h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
                       <div
                         className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-300"
@@ -265,35 +382,59 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     </div>
                     <div className="mt-2 flex items-center justify-between text-[10px] text-slate-400">
                       <span className="flex items-center gap-1">
-                        <Flame className="h-3 w-3 text-amber-400" /> Warmup: <span className="font-mono text-slate-300 tabular-nums">{warmup}%</span>
+                        <Flame className="h-3 w-3 text-amber-400" /> Warmup:{' '}
+                        <span className="font-mono text-slate-300 tabular-nums">{warmup}%</span>
                       </span>
-                      <span className="text-emerald-400">Health: <span className="font-mono tabular-nums">{health}%</span></span>
+                      <span
+                        className={`font-mono uppercase ${
+                          mb.status === 'reauth_required'
+                            ? 'text-rose-400'
+                            : mb.status === 'connected'
+                            ? 'text-emerald-400'
+                            : 'text-amber-400'
+                        }`}
+                      >
+                        {mb.status.replace(/_/g, ' ')} · {health}%
+                      </span>
                     </div>
                   </div>
                 );
               })}
+              {safeMailboxes.length === 0 && (
+                <div className="rounded-lg border border-dashed border-slate-800 p-4 text-center text-xs text-slate-500">
+                  No email accounts configured yet.
+                </div>
+              )}
             </div>
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs text-slate-400">
-            <span className="flex items-center gap-1.5">
-              <ShieldCheck className="h-4 w-4 text-emerald-400" /> SPF, DKIM, DMARC 100%
+            <button
+              onClick={() => onNavigateTab?.('deliverability')}
+              className="flex items-center gap-1.5 hover:text-blue-300 transition cursor-pointer"
+            >
+              <ShieldCheck className="h-4 w-4 text-blue-400" />
+              <span>Run DNS Audit (SPF/DKIM/DMARC)</span>
+            </button>
+            <span className="text-slate-300 font-medium font-mono text-[11px]">
+              {summary.connectedProductionMailboxesCount}/{safeMailboxes.length} Prod
             </span>
-            <span className="text-slate-300 font-medium font-mono text-[11px]">{safeMailboxes.length} Mailboxes</span>
           </div>
         </div>
       </div>
 
-      {/* Bottom Grid: Recent Conversations & Active Campaigns */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Bottom Grid: Recent Conversations, Campaign Performance & Top Opportunities */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Recent Inbound Conversations */}
         <div className="surface-card rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="text-sm font-semibold text-white">Recent Inbound Conversations</h3>
-              <p className="text-xs text-slate-400">Incoming replies triaged by AI sentiment engine</p>
+              <h3 className="text-sm font-semibold text-white">Recent Conversations</h3>
+              <p className="text-xs text-slate-400">Incoming replies triaged by intent</p>
             </div>
-            <span className="text-xs font-mono font-medium text-blue-400 tabular-nums">{safeConversations.length} Threads</span>
+            <span className="text-xs font-mono font-medium text-blue-400 tabular-nums">
+              {safeConversations.length} Threads
+            </span>
           </div>
 
           <div className="space-y-2.5">
@@ -327,6 +468,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 <ArrowUpRight className="h-4 w-4 text-slate-500 shrink-0 mt-1" />
               </div>
             ))}
+            {safeConversations.length === 0 && (
+              <div className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-xs text-slate-500">
+                No inbound replies recorded yet.
+              </div>
+            )}
           </div>
         </div>
 
@@ -360,10 +506,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   className="rounded-lg bg-slate-900/60 border border-slate-800 p-3.5 hover:bg-slate-800/60 hover:border-slate-700 transition cursor-pointer"
                 >
                   <div className="flex items-center justify-between mb-1.5">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-slate-200">{camp.name || 'Untitled Campaign'}</span>
+                    <div className="flex items-center gap-2 truncate">
+                      <span className="text-xs font-semibold text-slate-200 truncate">
+                        {camp.name || 'Untitled Campaign'}
+                      </span>
                       <span
-                        className={`rounded px-1.5 py-0.2 text-[9px] font-semibold uppercase ${
+                        className={`rounded px-1.5 py-0.2 text-[9px] font-semibold uppercase shrink-0 ${
                           camp.status === 'active'
                             ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
                             : 'bg-slate-800 text-slate-300 border border-slate-700'
@@ -372,7 +520,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                         {camp.status || 'draft'}
                       </span>
                     </div>
-                    <span className="text-[11px] text-slate-400 font-mono tabular-nums">{stepCount} Steps</span>
+                    <span className="text-[11px] text-slate-400 font-mono tabular-nums shrink-0">
+                      {stepCount} Steps
+                    </span>
                   </div>
 
                   <div className="grid grid-cols-4 gap-2 text-center text-xs mt-3 pt-2.5 border-t border-slate-800">
@@ -396,7 +546,77 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 </div>
               );
             })}
+            {safeCampaigns.length === 0 && (
+              <div className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-xs text-slate-500">
+                No campaigns created yet.
+              </div>
+            )}
           </div>
+        </div>
+
+        {/* Top Opportunities (CRM Deals) */}
+        <div className="surface-card rounded-xl p-5 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-sm font-semibold text-white flex items-center gap-1.5">
+                  <Briefcase className="h-4 w-4 text-emerald-400" />
+                  Top Opportunities
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Open CRM pipeline ({summary.openDealsCount} active deal{summary.openDealsCount === 1 ? '' : 's'})
+                </p>
+              </div>
+              <span className="text-xs font-mono font-bold text-emerald-400 tabular-nums">
+                ${summary.openPipelineValue.toLocaleString()}
+              </span>
+            </div>
+
+            <div className="space-y-2.5">
+              {summary.topOpportunities.map((deal) => (
+                <div
+                  key={deal.id}
+                  onClick={() => onNavigateTab?.('crm')}
+                  className="rounded-lg bg-slate-900/60 border border-slate-800 p-3 hover:bg-slate-800/60 hover:border-slate-700 transition cursor-pointer"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-200 truncate">{deal.title}</span>
+                    <span className="text-xs font-mono font-bold text-emerald-400 tabular-nums shrink-0">
+                      ${(deal.value || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-[11px] text-slate-400">
+                    <span className="truncate">
+                      {deal.leadCompany || 'Account'} · {deal.leadName || 'Contact'}
+                    </span>
+                    <span className="rounded bg-slate-800 border border-slate-700 px-1.5 py-0.2 text-[9px] font-mono uppercase text-slate-300 shrink-0">
+                      {deal.stage.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {summary.topOpportunities.length === 0 && (
+                <div className="rounded-lg border border-dashed border-slate-800 p-6 text-center text-xs text-slate-500">
+                  No open CRM opportunities yet. Deals created in CRM Pipeline appear here automatically.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {onNavigateTab && (
+            <div className="mt-4 pt-3 border-t border-slate-800 flex items-center justify-between text-xs">
+              <span className="text-slate-400 flex items-center gap-1">
+                <DollarSign className="h-3.5 w-3.5 text-emerald-400" />
+                Live SQLite Pipeline
+              </span>
+              <button
+                onClick={() => onNavigateTab('crm')}
+                className="text-blue-400 hover:text-blue-300 font-medium cursor-pointer"
+              >
+                Open CRM Pipeline →
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

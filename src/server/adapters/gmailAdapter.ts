@@ -147,8 +147,15 @@ export async function ensureValidGmailToken(
   const refreshPromise = (async (): Promise<RefreshResult> => {
     try {
       const result = await refreshGoogleToken(oauth);
+      const refreshAt = new Date().toISOString();
+      mailbox.lastTokenRefreshAt = refreshAt;
       if (result.success && result.accessToken) {
-        // Persist refreshed token to SQLite database
+        mailbox.status = 'connected';
+        mailbox.lastError = undefined;
+        mailbox.lastTokenRefreshStatus = 'ok';
+        mailbox.lastTokenRefreshError = undefined;
+
+        // Persist refreshed token and metadata directly to SQLite database
         try {
           const { getSqliteDatabase } = await import('../db');
           const db = getSqliteDatabase();
@@ -156,20 +163,69 @@ export async function ensureValidGmailToken(
             UPDATE email_accounts
             SET oauth_access_token = ?,
                 oauth_expiry = ?,
+                oauth_refresh_token_encrypted = COALESCE(?, oauth_refresh_token_encrypted),
                 status = 'connected',
-                data = json_set(data, '$.oauth.accessToken', ?, '$.oauth.expiresAt', ?),
+                data = json_set(
+                  data,
+                  '$.oauth.accessToken', ?,
+                  '$.oauth.expiresAt', ?,
+                  '$.oauth.refreshToken', ?,
+                  '$.status', 'connected',
+                  '$.lastTokenRefreshAt', ?,
+                  '$.lastTokenRefreshStatus', 'ok',
+                  '$.lastTokenRefreshError', json('null'),
+                  '$.lastError', json('null')
+                ),
                 updated_at = datetime('now')
             WHERE id = ?
           `).run(
             result.accessToken,
             new Date(result.expiresAt!).toISOString(),
+            oauth.refreshToken || null,
             result.accessToken,
             result.expiresAt!,
+            oauth.refreshToken || null,
+            refreshAt,
             mailbox.id
           );
         } catch (dbErr) {
           console.warn('[GmailAdapter] Could not update refreshed token in DB:', dbErr);
         }
+      } else {
+        mailbox.lastTokenRefreshStatus = 'error';
+        mailbox.lastTokenRefreshError = result.error || 'Token refresh failed';
+        if (result.reauthRequired) {
+          mailbox.status = 'reauth_required';
+          mailbox.lastError = result.error || 'Google re-authorization required';
+        } else {
+          mailbox.status = 'temporary_error';
+          mailbox.lastError = result.error || 'Token refresh failed';
+        }
+        try {
+          const { getSqliteDatabase } = await import('../db');
+          const db = getSqliteDatabase();
+          db.prepare(`
+            UPDATE email_accounts
+            SET status = ?,
+                data = json_set(
+                  data,
+                  '$.status', ?,
+                  '$.lastError', ?,
+                  '$.lastTokenRefreshAt', ?,
+                  '$.lastTokenRefreshStatus', 'error',
+                  '$.lastTokenRefreshError', ?
+                ),
+                updated_at = datetime('now')
+            WHERE id = ?
+          `).run(
+            mailbox.status,
+            mailbox.status,
+            mailbox.lastError || '',
+            refreshAt,
+            mailbox.lastTokenRefreshError,
+            mailbox.id
+          );
+        } catch (_) {}
       }
       return result;
     } finally {
@@ -185,6 +241,108 @@ export async function ensureValidGmailToken(
     error: outcome.error,
     reauthRequired: outcome.reauthRequired,
   };
+}
+
+export interface GmailVerifyResult {
+  success: boolean;
+  status: MailboxAccount['status'];
+  reauthRequired?: boolean;
+  profileEmail?: string;
+  messagesTotal?: number;
+  message: string;
+}
+
+/**
+ * Live Gmail API connection handshake against users/me/profile.
+ * Performs 1 forced token refresh and retry on HTTP 401.
+ */
+export async function verifyGmailConnection(
+  mailbox: MailboxAccount
+): Promise<GmailVerifyResult> {
+  let tokenResult = await ensureValidGmailToken(mailbox);
+
+  if (!tokenResult.token) {
+    if (tokenResult.reauthRequired) {
+      mailbox.status = 'reauth_required';
+      mailbox.lastError = tokenResult.error || 'Google re-authorization required';
+    } else {
+      mailbox.status = 'temporary_error';
+      mailbox.lastError = tokenResult.error || 'Failed to obtain Gmail OAuth access token';
+    }
+    return {
+      success: false,
+      status: mailbox.status,
+      reauthRequired: Boolean(tokenResult.reauthRequired),
+      message: mailbox.lastError,
+    };
+  }
+
+  try {
+    let profileRes = await fetch(
+      'https://gmail.googleapis.com/gmail/v1/users/me/profile',
+      {
+        headers: { Authorization: `Bearer ${tokenResult.token}` },
+      }
+    );
+
+    if (profileRes.status === 401) {
+      tokenResult = await ensureValidGmailToken(mailbox, true);
+      if (!tokenResult.token) {
+        mailbox.status = tokenResult.reauthRequired ? 'reauth_required' : 'temporary_error';
+        mailbox.lastError = tokenResult.error || 'Google OAuth token expired or revoked';
+        return {
+          success: false,
+          status: mailbox.status,
+          reauthRequired: Boolean(tokenResult.reauthRequired),
+          message: mailbox.lastError,
+        };
+      }
+
+      profileRes = await fetch(
+        'https://gmail.googleapis.com/gmail/v1/users/me/profile',
+        {
+          headers: { Authorization: `Bearer ${tokenResult.token}` },
+        }
+      );
+    }
+
+    if (!profileRes.ok) {
+      const errBody = await profileRes.text();
+      const isAuth = profileRes.status === 401 || profileRes.status === 403;
+      mailbox.status = isAuth ? 'reauth_required' : 'temporary_error';
+      mailbox.lastError = isAuth
+        ? `Google OAuth authorization failed (HTTP ${profileRes.status}). Reconnect required.`
+        : `Gmail API profile handshake failed (HTTP ${profileRes.status}): ${errBody.slice(0, 180)}`;
+      return {
+        success: false,
+        status: mailbox.status,
+        reauthRequired: isAuth,
+        message: mailbox.lastError,
+      };
+    }
+
+    const profileData = await profileRes.json();
+    mailbox.status = 'connected';
+    mailbox.lastError = undefined;
+    mailbox.lastSyncAt = new Date().toISOString();
+
+    return {
+      success: true,
+      status: 'connected',
+      profileEmail: profileData.emailAddress || mailbox.email,
+      messagesTotal: profileData.messagesTotal,
+      message: `Live Gmail API handshake succeeded for ${profileData.emailAddress || mailbox.email}`,
+    };
+  } catch (err: any) {
+    mailbox.status = 'temporary_error';
+    mailbox.lastError = `Network error reaching Gmail API: ${err.message}`;
+    return {
+      success: false,
+      status: 'temporary_error',
+      reauthRequired: false,
+      message: mailbox.lastError,
+    };
+  }
 }
 
 /**
@@ -385,7 +543,9 @@ export async function syncGmailReplies(mailbox: MailboxAccount): Promise<Inbound
     const messages: InboundMessage[] = [];
 
     if (!listData.messages || !Array.isArray(listData.messages)) {
-      mailbox.status = 'sync_completed';
+      mailbox.status = 'connected';
+      mailbox.syncStatus = 'completed';
+      mailbox.lastSyncAt = new Date().toISOString();
       mailbox.lastError = undefined;
       return [];
     }
@@ -425,12 +585,15 @@ export async function syncGmailReplies(mailbox: MailboxAccount): Promise<Inbound
       });
     }
 
-    mailbox.status = 'sync_completed';
+    mailbox.status = 'connected';
+    mailbox.syncStatus = 'completed';
+    mailbox.lastSyncAt = new Date().toISOString();
     mailbox.lastError = undefined;
     return messages;
   } catch (err: any) {
     console.error(`[GmailAdapter] Error syncing replies for ${mailbox.email}:`, err.message);
     mailbox.status = 'temporary_error';
+    mailbox.syncStatus = 'error';
     mailbox.lastError = err.message;
     return [];
   }

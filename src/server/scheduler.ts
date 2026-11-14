@@ -5,38 +5,101 @@ import { interpolateTemplate } from '../utils/templateEngine';
 import { selectNextMailbox } from '../utils/senderRotation';
 
 /**
+ * Extracts YYYY-MM-DD, day-of-week (1=Mon..7=Sun), and minutes since midnight
+ * in the given IANA timezone. Falls back cleanly to America/Chicago if invalid.
+ */
+function getZonedDateTimeParts(date: Date, timeZone: string): {
+  dateStr: string;
+  campaignDay: number;
+  currentMinutes: number;
+} {
+  let tz = timeZone || 'America/Chicago';
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(date);
+  } catch (_) {
+    tz = 'America/Chicago';
+    parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(date);
+  }
+
+  const get = (type: string) => parts.find((p) => p.type === type)?.value || '';
+  const year = get('year');
+  const month = get('month');
+  const day = get('day');
+  const hour = parseInt(get('hour'), 10) % 24;
+  const minute = parseInt(get('minute'), 10);
+  const weekday = get('weekday');
+
+  const dayMap: Record<string, number> = {
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+    Sun: 7,
+  };
+
+  return {
+    dateStr: `${year}-${month}-${day}`,
+    campaignDay: dayMap[weekday] || 1,
+    currentMinutes: hour * 60 + minute,
+  };
+}
+
+/**
  * Checks if current time is within the campaign's active sending schedule window
  */
 export function isWithinScheduleWindow(schedule: CampaignSchedule, date = new Date()): boolean {
   if (!schedule) return true;
 
-  // Check date range if specified
-  if (schedule.startDate && new Date(schedule.startDate) > date) {
-    return false;
+  const { dateStr, campaignDay, currentMinutes } = getZonedDateTimeParts(
+    date,
+    schedule.timezone || 'America/Chicago'
+  );
+
+  // Check date range if specified (YYYY-MM-DD in schedule timezone)
+  if (schedule.startDate) {
+    const startOnly = schedule.startDate.split('T')[0];
+    if (dateStr < startOnly) return false;
   }
-  if (schedule.endDate && new Date(schedule.endDate) < date) {
-    return false;
+  if (schedule.endDate) {
+    const endOnly = schedule.endDate.split('T')[0];
+    if (dateStr > endOnly) return false;
   }
 
-  // Check day of week: JavaScript getDay() returns 0=Sun, 1=Mon, ..., 6=Sat
-  // Campaign schedule format: 1=Mon, 2=Tue, ..., 7=Sun
-  const jsDay = date.getDay();
-  const campaignDay = jsDay === 0 ? 7 : jsDay;
-
+  // Check day of week (1=Mon, 2=Tue, ..., 7=Sun)
   if (schedule.sendingDays && schedule.sendingDays.length > 0) {
     if (!schedule.sendingDays.includes(campaignDay)) {
       return false;
     }
   }
 
-  // Check hours window (e.g. "09:00" to "17:00")
+  // Check hours window (e.g. "09:00" to "17:00") in configured timezone
   if (schedule.startTime && schedule.endTime) {
     const [startH, startM] = schedule.startTime.split(':').map(Number);
     const [endH, endM] = schedule.endTime.split(':').map(Number);
 
-    const currentMinutes = date.getHours() * 60 + date.getMinutes();
     const startMinutes = (startH || 0) * 60 + (startM || 0);
-    const endMinutes = (endH || 24) * 60 + (endM || 0);
+    const endMinutes = (endH ?? 24) * 60 + (endM || 0);
 
     if (currentMinutes < startMinutes || currentMinutes > endMinutes) {
       return false;

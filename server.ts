@@ -33,7 +33,7 @@ import {
   pauseAllCampaigns,
   clearPendingQueue,
 } from './src/server/worker';
-import { ensureValidGmailToken } from './src/server/adapters/gmailAdapter';
+import { ensureValidGmailToken, verifyGmailConnection } from './src/server/adapters/gmailAdapter';
 import { getQueueStats } from './src/server/queue';
 import {
   provisionControlledTestMailbox,
@@ -43,6 +43,7 @@ import {
 import { fileURLToPath } from 'url';
 import { enrollAllActiveCampaigns, enrollCampaignLeadsIntoQueue, isWithinScheduleWindow } from './src/server/scheduler';
 import { validateEmailSyntax, parseCsvRows, autoDetectColumnMappings } from './src/utils/emailValidator';
+import { isProductionConnectedMailbox } from './src/utils/senderRotation';
 import { Lead, Campaign, MailboxAccount, Deal, Automation, Company, Task, ZeroCostStatus } from './src/types';
 
 dotenv.config();
@@ -227,6 +228,39 @@ app.post('/api/auth/logout', (req: Request, res: Response) => {
   res.json({ success: true });
 });
 
+// Enforce local session auth on protected API endpoints whenever an admin password is configured
+app.use('/api', (req: Request, res: Response, next) => {
+  if (
+    req.path.startsWith('/auth') ||
+    req.path.startsWith('/unsubscribe') ||
+    req.path === '/health'
+  ) {
+    return next();
+  }
+  try {
+    const sqlDb = getSqliteDatabase();
+    const countRow = sqlDb.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
+    if (countRow.count === 0) {
+      return next(); // Single-user local passwordless mode
+    }
+
+    const cookies = parseCookies(req);
+    const sessionToken = cookies['outboundos_session'];
+    if (!sessionToken) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    const session = sqlDb
+      .prepare(`SELECT id FROM sessions WHERE token = ? AND datetime(expires_at) > datetime('now')`)
+      .get(sessionToken);
+    if (!session) {
+      return res.status(401).json({ error: 'Session expired or invalid' });
+    }
+    return next();
+  } catch (err) {
+    return next();
+  }
+});
+
 // ==========================================
 // GOOGLE OAUTH 2.0 FLOW
 // ==========================================
@@ -308,12 +342,21 @@ app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
     } catch (_) {}
 
     const db = getDatabase();
+    const nowIso = new Date().toISOString();
     let mailbox = db.mailboxes.find((m) => m.email.toLowerCase() === email.toLowerCase());
     const encryptedRefreshToken = refreshToken ? encryptSecret(refreshToken) : (mailbox?.oauth?.refreshToken || '');
 
     if (mailbox) {
       mailbox.name = name;
       mailbox.status = 'connected';
+      mailbox.syncStatus = 'idle';
+      mailbox.lastError = undefined;
+      mailbox.lastSyncAt = nowIso;
+      mailbox.lastTokenRefreshAt = nowIso;
+      mailbox.lastTokenRefreshStatus = 'ok';
+      mailbox.lastTokenRefreshError = undefined;
+      mailbox.dailyLimit = mailbox.dailyLimit || mailbox.dailyQuota || 50;
+      mailbox.dailyQuota = mailbox.dailyQuota || mailbox.dailyLimit || 50;
       mailbox.oauth = {
         accessToken,
         refreshToken: encryptedRefreshToken,
@@ -321,7 +364,7 @@ app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
         clientId,
         clientSecret,
       };
-      mailbox.updatedAt = new Date().toISOString();
+      mailbox.updatedAt = nowIso;
     } else {
       const newMailbox: MailboxAccount = {
         id: `mb-google-${Date.now()}`,
@@ -330,6 +373,7 @@ app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
         email,
         provider: 'gmail',
         status: 'connected',
+        syncStatus: 'idle',
         dailyLimit: 50,
         dailyQuota: 50,
         sentToday: 0,
@@ -337,7 +381,9 @@ app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
         warmupScore: 98,
         healthScore: 98,
         signature: '',
-        lastSyncAt: new Date().toISOString(),
+        lastSyncAt: nowIso,
+        lastTokenRefreshAt: nowIso,
+        lastTokenRefreshStatus: 'ok',
         warmupEnabled: true,
         warmupDailyLimit: 20,
         warmupSentToday: 0,
@@ -351,8 +397,8 @@ app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
           clientId,
           clientSecret,
         },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        createdAt: nowIso,
+        updatedAt: nowIso,
       };
       db.mailboxes.push(newMailbox);
     }
@@ -463,30 +509,48 @@ app.get('/api/leads', (req: Request, res: Response) => {
 
 app.post('/api/leads', (req: Request, res: Response) => {
   const db = getDatabase();
-  const leadData = req.body;
+  const leadData = req.body || {};
 
-  // Email validation & syntax check
-  const val = validateEmailSyntax(leadData.email);
+  const email = (leadData.email || '').trim().toLowerCase();
+  const firstName = (leadData.firstName || '').trim();
+  const lastName = (leadData.lastName || '').trim();
+  const company = (leadData.company || '').trim();
+  const jobTitle = (leadData.jobTitle || '').trim();
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email address is required.' });
+  }
+  const val = validateEmailSyntax(email);
+  if (!val.isValidSyntax) {
+    return res.status(400).json({ error: val.reason || 'Please enter a valid email address.' });
+  }
+  if (!firstName) {
+    return res.status(400).json({ error: 'First name is required for manual lead entry.' });
+  }
+  if (!company) {
+    return res.status(400).json({ error: 'Company name is required for manual lead entry.' });
+  }
+
   const newLead: Lead = {
     id: `lead-${Date.now()}-${Math.random().toString(36).substring(7)}`,
     workspaceId: db.workspace.id,
-    firstName: leadData.firstName || '',
-    lastName: leadData.lastName || '',
-    fullName: leadData.fullName || `${leadData.firstName || ''} ${leadData.lastName || ''}`.trim(),
-    email: leadData.email.trim().toLowerCase(),
-    jobTitle: leadData.jobTitle || 'Executive',
-    company: leadData.company || 'Enterprise',
-    website: leadData.website || '',
-    domain: leadData.domain || (leadData.email.split('@')[1] || ''),
+    firstName,
+    lastName,
+    fullName: (leadData.fullName || `${firstName} ${lastName}`.trim()).trim(),
+    email,
+    jobTitle: jobTitle || 'Contact',
+    company,
+    website: (leadData.website || '').trim(),
+    domain: (leadData.domain || email.split('@')[1] || '').trim(),
     industry: leadData.industry || 'Technology',
     country: leadData.country || 'United States',
-    city: leadData.city || 'San Francisco',
+    city: leadData.city || '',
     linkedinUrl: leadData.linkedinUrl || '',
     phone: leadData.phone || '',
     source: leadData.source || 'Manual Entry',
     verificationStatus: val.status,
     status: 'new',
-    assignedOwner: leadData.assignedOwner || 'Azeem Khawer',
+    assignedOwner: leadData.assignedOwner || db.workspace.ownerEmail || 'Owner',
     customFields: leadData.customFields || {},
     notes: leadData.notes || '',
     tags: leadData.tags || ['New Lead'],
@@ -690,6 +754,8 @@ app.get('/api/campaigns/:id', (req: Request, res: Response) => {
 
 app.post('/api/campaigns', (req: Request, res: Response) => {
   const db = getDatabase();
+  const defaultProdMailboxIds = db.mailboxes.filter(isProductionConnectedMailbox).map((m) => m.id);
+  const defaultTimezone = db.workspace?.timezone || 'America/Chicago';
   const newCamp: Campaign = {
     id: `camp-${Date.now()}`,
     workspaceId: db.workspace.id,
@@ -697,13 +763,13 @@ app.post('/api/campaigns', (req: Request, res: Response) => {
     description: req.body.description || '',
     status: 'draft',
     leadListId: req.body.leadListId || (db.lists[0]?.id || ''),
-    mailboxAccountIds: req.body.mailboxAccountIds || (db.mailboxes.map((m) => m.id)),
+    mailboxAccountIds: Array.isArray(req.body.mailboxAccountIds) ? req.body.mailboxAccountIds : defaultProdMailboxIds,
     schedule: req.body.schedule || {
       startDate: new Date().toISOString().split('T')[0],
       sendingDays: [1, 2, 3, 4, 5],
       startTime: '09:00',
       endTime: '17:00',
-      timezone: 'America/Los_Angeles',
+      timezone: defaultTimezone,
       useRecipientTimezone: true,
       minIntervalSeconds: 60,
     },
@@ -898,6 +964,7 @@ app.get('/api/campaigns/:id/prelaunch-summary', (req: Request, res: Response) =>
 
   const assignedMailboxes = db.mailboxes.filter((m) => camp.mailboxAccountIds?.includes(m.id));
   const connectedMailboxes = assignedMailboxes.filter((m) => m.status === 'connected');
+  const invalidAssignedMailboxes = assignedMailboxes.filter((m) => m.status !== 'connected');
 
   const firstStep = camp.steps?.find((s) => s.type === 'email');
   const firstStepSubject = firstStep?.emailData?.subject || '(No subject specified)';
@@ -926,10 +993,16 @@ app.get('/api/campaigns/:id/prelaunch-summary', (req: Request, res: Response) =>
       email: m.email,
       name: m.name,
       provider: m.provider,
+      isTestMailbox: Boolean(m.isTestMailbox),
+    })),
+    invalidAssignedMailboxes: invalidAssignedMailboxes.map((m) => ({
+      id: m.id,
+      email: m.email,
+      status: m.status,
     })),
     firstStepSubject,
     estimatedDurationMinutes,
-    timezone: camp.schedule?.timezone || 'America/Los_Angeles',
+    timezone: camp.schedule?.timezone || db.workspace?.timezone || 'America/Chicago',
     scheduledDays: camp.schedule?.sendingDays || [1, 2, 3, 4, 5],
     dailyWindow: `${camp.schedule?.startTime || '09:00'} - ${camp.schedule?.endTime || '17:00'}`,
     dailyLimit: camp.settings?.dailyLimit || 50,
@@ -1112,58 +1185,67 @@ app.post('/api/mailboxes/:id/test-connection', async (req: Request, res: Respons
     });
   }
 
-  // Gmail OAuth check & proactive auto-refresh
+  // Gmail live OAuth & API profile handshake
   if (mb.provider === 'gmail') {
-    const tokenResult = await ensureValidGmailToken(mb);
+    const verifyResult = await verifyGmailConnection(mb);
     mb.lastSyncAt = new Date().toISOString();
-
-    if (tokenResult.token) {
-      mb.status = 'connected';
-      mb.lastError = undefined;
-      saveDatabase(db);
-      return res.json({
-        success: true,
-        status: 'connected',
-        message: `Gmail OAuth credentials validated & active for ${mb.email}`,
-      });
-    }
-
-    if (tokenResult.reauthRequired) {
-      mb.status = 'reauth_required';
-      mb.lastError = tokenResult.error || 'Google re-authorization required';
-      saveDatabase(db);
-      return res.json({
-        success: false,
-        status: 'reauth_required',
-        reauthRequired: true,
-        message: mb.lastError,
-      });
-    }
-
-    mb.status = 'temporary_error';
-    mb.lastError = tokenResult.error || 'Connection error';
     saveDatabase(db);
+
     return res.json({
-      success: false,
-      status: 'temporary_error',
-      message: mb.lastError,
+      success: verifyResult.success,
+      status: verifyResult.status,
+      reauthRequired: Boolean(verifyResult.reauthRequired),
+      profileEmail: verifyResult.profileEmail,
+      lastTokenRefreshAt: mb.lastTokenRefreshAt,
+      lastTokenRefreshStatus: mb.lastTokenRefreshStatus,
+      message: verifyResult.message,
     });
   }
 
-  // Microsoft OAuth check
+  // Microsoft OAuth live check
   const token = mb.oauth?.accessToken;
   const hasAuth = Boolean(token || mb.oauth?.refreshToken);
   mb.lastSyncAt = new Date().toISOString();
 
   if (!hasAuth) {
-    mb.status = 'error';
+    mb.status = 'reauth_required';
     mb.lastError = `${mb.provider.toUpperCase()} mailbox has no OAuth credentials configured`;
     saveDatabase(db);
     return res.json({
       success: false,
-      status: 'error',
+      status: 'reauth_required',
+      reauthRequired: true,
       message: mb.lastError,
     });
+  }
+
+  if (token) {
+    try {
+      const meRes = await fetch('https://graph.microsoft.com/v1.0/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!meRes.ok) {
+        const isAuth = meRes.status === 401 || meRes.status === 403;
+        mb.status = isAuth ? 'reauth_required' : 'temporary_error';
+        mb.lastError = `Microsoft Graph returned HTTP ${meRes.status}`;
+        saveDatabase(db);
+        return res.json({
+          success: false,
+          status: mb.status,
+          reauthRequired: isAuth,
+          message: mb.lastError,
+        });
+      }
+    } catch (err: any) {
+      mb.status = 'temporary_error';
+      mb.lastError = `Microsoft Graph network check failed: ${err.message}`;
+      saveDatabase(db);
+      return res.json({
+        success: false,
+        status: 'temporary_error',
+        message: mb.lastError,
+      });
+    }
   }
 
   mb.status = 'connected';
@@ -1173,7 +1255,7 @@ app.post('/api/mailboxes/:id/test-connection', async (req: Request, res: Respons
   res.json({
     success: true,
     status: 'connected',
-    message: `${mb.provider.toUpperCase()} OAuth credentials configured and active for ${mb.email}`,
+    message: `${mb.provider.toUpperCase()} OAuth credentials verified and active for ${mb.email}`,
   });
 });
 
@@ -1182,25 +1264,33 @@ app.post('/api/mailboxes/:id/sync-replies', async (req: Request, res: Response) 
   const mb = db.mailboxes.find((m) => m.id === req.params.id);
   if (!mb) return res.status(404).json({ error: 'Mailbox not found' });
 
-  mb.status = 'synchronizing';
+  mb.syncStatus = 'synchronizing';
   saveDatabase(db);
 
   try {
     const result = await syncAllMailboxReplies();
     const updatedMb = db.mailboxes.find((m) => m.id === req.params.id);
-    const finalStatus = updatedMb?.status || 'sync_completed';
+    if (updatedMb && updatedMb.status === 'sync_completed') {
+      updatedMb.status = 'connected';
+    }
+    const finalStatus = updatedMb?.status || 'connected';
+    saveDatabase(db);
 
     res.json({
-      success: finalStatus !== 'reauth_required' && finalStatus !== 'error',
+      success: finalStatus === 'connected',
       status: finalStatus,
       reauthRequired: finalStatus === 'reauth_required',
-      message: finalStatus === 'reauth_required'
-        ? (updatedMb?.lastError || 'Google authorization expired. Reconnect required.')
-        : `Synced inbound messages successfully.`,
+      message:
+        finalStatus === 'reauth_required'
+          ? updatedMb?.lastError || 'Google authorization expired. Reconnect required.'
+          : finalStatus === 'temporary_error'
+          ? updatedMb?.lastError || 'Temporary connection error during reply sync.'
+          : `Synced inbound messages successfully (${result.syncedCount} new).`,
       ...result,
     });
   } catch (err: any) {
     mb.status = 'temporary_error';
+    mb.syncStatus = 'error';
     mb.lastError = err.message;
     saveDatabase(db);
     res.json({
@@ -1568,6 +1658,16 @@ app.put('/api/automations/:id', (req: Request, res: Response) => {
   Object.assign(auto, req.body);
   saveDatabase(db);
   res.json({ success: true, automation: auto });
+});
+
+app.delete('/api/automations/:id', (req: Request, res: Response) => {
+  const db = getDatabase();
+  const idx = db.automations.findIndex((a) => a.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Automation not found' });
+
+  db.automations.splice(idx, 1);
+  saveDatabase(db);
+  res.json({ success: true });
 });
 
 // ==========================================
@@ -2136,6 +2236,29 @@ app.get('/api/budget/status', (req: Request, res: Response) => {
   const storageStats = getStorageStats();
   const db = getDatabase();
 
+  const googleEnvConfigured = Boolean(
+    process.env.GOOGLE_CLIENT_ID?.trim() &&
+      process.env.GOOGLE_CLIENT_ID.trim() !== 'MY_GOOGLE_CLIENT_ID' &&
+      process.env.GOOGLE_CLIENT_SECRET?.trim()
+  );
+  const msEnvConfigured = Boolean(
+    process.env.MS_CLIENT_ID?.trim() && process.env.MS_CLIENT_SECRET?.trim()
+  );
+  const geminiEnvConfigured = Boolean(
+    process.env.GEMINI_API_KEY?.trim() &&
+      process.env.GEMINI_API_KEY.trim() !== 'MY_GEMINI_API_KEY'
+  );
+
+  const connectedGmailCount = db.mailboxes.filter(
+    (m) => m.provider === 'gmail' && m.status === 'connected'
+  ).length;
+  const connectedOutlookCount = db.mailboxes.filter(
+    (m) => m.provider === 'outlook' && m.status === 'connected'
+  ).length;
+  const connectedSmtpCount = db.mailboxes.filter(
+    (m) => m.provider === 'smtp' && m.status === 'connected'
+  ).length;
+
   const status: ZeroCostStatus = {
     monthlyOperatingCost: 0,
     currency: 'USD',
@@ -2162,7 +2285,12 @@ app.get('/api/budget/status', (req: Request, res: Response) => {
         name: 'Gmail API (OAuth 2.0)',
         dailyQuota: '500 free (Personal) / 2,000 free (Google Workspace)',
         cost: '$0.00',
-        status: db.mailboxes.some((m) => m.provider === 'gmail') ? 'connected' : 'ready',
+        status:
+          connectedGmailCount > 0
+            ? 'connected'
+            : googleEnvConfigured
+            ? 'ready'
+            : 'unconfigured',
         description: 'Standard free Google OAuth 2.0 quota with zero paid add-ons or relay fees.',
       },
       {
@@ -2170,7 +2298,12 @@ app.get('/api/budget/status', (req: Request, res: Response) => {
         name: 'Microsoft Graph (OAuth 2.0)',
         dailyQuota: 'Subject to free Outlook.com / M365 personal quota',
         cost: '$0.00',
-        status: db.mailboxes.some((m) => m.provider === 'outlook') ? 'connected' : 'ready',
+        status:
+          connectedOutlookCount > 0
+            ? 'connected'
+            : msEnvConfigured
+            ? 'ready'
+            : 'unconfigured',
         description: 'Direct Microsoft Graph REST dispatch with zero intermediate middleware cost.',
       },
       {
@@ -2178,7 +2311,7 @@ app.get('/api/budget/status', (req: Request, res: Response) => {
         name: 'Custom SMTP / IMAP (Domain, cPanel, Ethereal)',
         dailyQuota: 'Unlimited (governed by your own domain/server)',
         cost: '$0.00',
-        status: db.mailboxes.some((m) => m.provider === 'smtp') ? 'connected' : 'ready',
+        status: connectedSmtpCount > 0 ? 'connected' : 'ready',
         description: 'Connect any free or existing mailbox, cPanel mail, or Ethereal sandbox at $0.',
       },
     ],
@@ -2187,14 +2320,19 @@ app.get('/api/budget/status', (req: Request, res: Response) => {
       model: 'gemini-2.5-flash',
       freeQuota: '15 RPM / 1 Million TPM / 1,500 Requests/Day Free',
       cost: '$0.00',
-      status: process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY' ? 'configured' : 'unconfigured_fallback',
+      status: geminiEnvConfigured ? 'configured' : 'unconfigured_fallback',
       description: 'Generates cold sequences, prospect intelligence, and email improvements at $0 cost.',
     },
     localFeatures: [
-      { name: 'Local SQLite ACID Engine', cost: '$0.00', status: 'active', note: 'Native node:sqlite in WAL mode' },
+      { name: 'Local SQLite ACID Engine', cost: '$0.00', status: 'active', note: 'Native better-sqlite3 in WAL mode' },
       { name: 'Local DNS MX Validator', cost: '$0.00', status: 'active', note: 'Free RFC 5322 syntax & node:dns MX resolution' },
-      { name: 'Local Peer Pool Warmup', cost: '$0.00', status: 'active', note: 'Autonomous intra-pool warm-up scheduler' },
-      { name: 'Background Sending Worker', cost: '$0.00', status: 'active', note: 'Executes locally in background when browser is closed' },
+      { name: 'Local Peer Pool Warmup', cost: '$0.00', status: 'active', note: 'Local warmup scheduler' },
+      {
+        name: 'Background Sending Worker',
+        cost: '$0.00',
+        status: isWorkerSendingActive() ? 'active' : 'paused',
+        note: isWorkerSendingActive() ? 'Running in Node.js background' : 'Standby / Paused by user',
+      },
     ],
     optionalServicesDisabled: [
       { name: 'Snov.io API', status: 'disabled_not_required', cost: '$0.00', savings: 'Saved $39 - $189/mo' },
@@ -2207,7 +2345,14 @@ app.get('/api/budget/status', (req: Request, res: Response) => {
     ],
   };
 
-  res.json(status);
+  res.json({
+    ...status,
+    envFlags: {
+      googleOAuthConfigured: googleEnvConfigured,
+      microsoftOAuthConfigured: msEnvConfigured,
+      geminiConfigured: geminiEnvConfigured,
+    },
+  });
 });
 
 // ==========================================
