@@ -1,4 +1,5 @@
 import express, { Request, Response } from 'express';
+import http from 'http';
 import dotenv from 'dotenv';
 import path from 'path';
 import dns from 'dns';
@@ -2213,6 +2214,8 @@ app.get('/api/budget/status', (req: Request, res: Response) => {
 // 16. VITE MIDDLEWARE & SERVER START
 // ==========================================
 async function startServer() {
+  const httpServer = http.createServer(app);
+
   // Mount Vite middleware in development
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
@@ -2220,6 +2223,10 @@ async function startServer() {
       server: {
         middlewareMode: true,
         hmr: false,
+        ws: {
+          server: httpServer,
+        },
+        allowedHosts: true,
       },
       appType: 'spa',
     });
@@ -2235,7 +2242,7 @@ async function startServer() {
   // Executes continuously even when the browser is closed!
   startAutonomousBackgroundWorker();
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`OutboundOS Server running at http://0.0.0.0:${PORT}`);
   });
 }
