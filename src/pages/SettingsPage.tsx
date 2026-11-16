@@ -421,17 +421,36 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           </div>
         </div>
 
-        {/* CAN-SPAM & Physical Compliance */}
+        {/* Open Tracking & Compliance Safeguards */}
         <div className="surface-card rounded-xl p-5 space-y-4">
           <h3 className="text-sm font-semibold text-white flex items-center gap-2">
             <Shield className="h-4 w-4 text-emerald-400" />
-            CAN-SPAM & Legal Compliance Safeguards
+            Deliverability, Open Tracking &amp; Compliance Safeguards
           </h3>
 
           <div>
-            <label className="block text-slate-400 mb-1">Physical Business Street Address (Mandatory for CAN-SPAM)</label>
+            <label className="block text-slate-400 mb-1">
+              Public Tracking Base URL (Optional HTTPS URL for Live Open-Rate Pixel)
+            </label>
+            <input
+              type="url"
+              placeholder="https://track.yourdomain.com (leave empty on localhost)"
+              value={workspace.trackingBaseUrl || ''}
+              onChange={(e) => setWorkspace({ ...workspace, trackingBaseUrl: e.target.value })}
+              className="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-slate-100 font-mono text-xs focus:outline-none focus:border-blue-500/60"
+            />
+            <p className="mt-1 text-[11px] text-slate-400">
+              Gmail &amp; Outlook block/flag <code className="text-slate-300">localhost</code> links as spam and cannot reach your local PC without a public HTTPS URL (e.g. a domain or Cloudflare Tunnel). When left blank, OutboundOS omits localhost pixels automatically to keep emails out of spam.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-slate-400 mb-1">
+              Physical Business Street Address (Optional — only appended when campaign &quot;Compliance Footer&quot; is enabled)
+            </label>
             <input
               type="text"
+              placeholder="Leave blank for 1:1 personal cold outreach"
               value={workspace.physicalAddress}
               onChange={(e) => setWorkspace({ ...workspace, physicalAddress: e.target.value })}
               className="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-slate-100"
@@ -439,9 +458,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           </div>
 
           <div>
-            <label className="block text-slate-400 mb-1">Default Unsubscribe Footer Copy</label>
+            <label className="block text-slate-400 mb-1">
+              Custom Opt-Out Footer Copy (Optional — e.g. &quot;Reply stop if not relevant&quot;)
+            </label>
             <textarea
               rows={2}
+              placeholder="Leave blank for natural 1:1 cold emails without bulk-newsletter footers"
               value={workspace.unsubscribeFooter}
               onChange={(e) => setWorkspace({ ...workspace, unsubscribeFooter: e.target.value })}
               className="w-full rounded-lg bg-slate-900 border border-slate-800 p-2.5 text-slate-100 text-xs focus:outline-none focus:border-blue-500/60"

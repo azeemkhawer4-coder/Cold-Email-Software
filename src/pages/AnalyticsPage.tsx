@@ -55,21 +55,30 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       'Status',
       'Sent',
       'Delivered',
+      'Opened',
+      'Open Rate (%)',
       'Replies',
       'Positive Replies',
       'Meetings Booked',
       'Bounces',
     ];
-    const rows = campaigns.map((c) => [
-      `"${(c.name || '').replace(/"/g, '""')}"`,
-      c.status,
-      c.stats?.sent || 0,
-      c.stats?.delivered || 0,
-      c.stats?.replied || 0,
-      c.stats?.positiveReplies || 0,
-      c.stats?.meetingsBooked || 0,
-      c.stats?.bounced || 0,
-    ]);
+    const rows = campaigns.map((c) => {
+      const sent = c.stats?.sent || 0;
+      const opened = c.stats?.opened || 0;
+      const openRatePct = sent > 0 ? ((opened / sent) * 100).toFixed(1) : '0.0';
+      return [
+        `"${(c.name || '').replace(/"/g, '""')}"`,
+        c.status,
+        sent,
+        c.stats?.delivered || 0,
+        opened,
+        openRatePct,
+        c.stats?.replied || 0,
+        c.stats?.positiveReplies || 0,
+        c.stats?.meetingsBooked || 0,
+        c.stats?.bounced || 0,
+      ];
+    });
     const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -103,7 +112,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       </div>
 
       {/* Metrics Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3.5">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
         <div className="surface-card surface-card-hover rounded-xl p-4 transition-all duration-150">
           <span className="text-xs text-slate-400 block font-medium">Total Sent</span>
           <span className="text-2xl font-bold text-white mt-1 block font-mono tabular-nums">
@@ -111,6 +120,16 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           </span>
           <span className="text-[10px] text-cyan-400 block mt-1 font-mono">
             {summary.totalDelivered} accepted
+          </span>
+        </div>
+
+        <div className="surface-card surface-card-hover rounded-xl p-4 transition-all duration-150">
+          <span className="text-xs text-slate-400 block font-medium">Open Rate</span>
+          <span className="text-2xl font-bold text-violet-400 mt-1 block font-mono tabular-nums">
+            {summary.openRate.toFixed(1)}%
+          </span>
+          <span className="text-[10px] text-slate-400 block mt-1 font-mono">
+            {summary.totalOpened} unique opens
           </span>
         </div>
 
@@ -239,8 +258,11 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     {v.campaignName} · Step {v.stepNumber}
                   </span>
                 </div>
-                <div className="pt-2 flex items-center justify-between border-t border-slate-700/60 font-mono text-[11px]">
+                <div className="pt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-700/60 font-mono text-[11px]">
                   <span className="text-slate-400">Sent: {v.sentCount}</span>
+                  <span className="text-violet-400 font-semibold">
+                    Opens: {v.openCount} ({v.openRate.toFixed(1)}%)
+                  </span>
                   <span className="text-indigo-400 font-semibold">
                     Replies: {v.replyCount} ({v.replyRate.toFixed(1)}%)
                   </span>

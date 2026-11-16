@@ -99,7 +99,8 @@ export async function sendSmtpMessage(
   to: string,
   subject: string,
   bodyHtml: string,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
+  options?: { textBody?: string; plainTextOnly?: boolean; includeUnsubscribeHeader?: boolean }
 ): Promise<AdapterSendResult & { previewUrl?: string }> {
   if (!mailbox.smtpHost) {
     return {
@@ -112,19 +113,23 @@ export async function sendSmtpMessage(
 
   try {
     const transporter = getTransporterForMailbox(mailbox);
-    const domain = mailbox.email.split('@')[1] || 'outboundos.com';
+    const plainText = options?.textBody || bodyHtml.replace(/<[^>]*>/g, '');
+    const customHeaders: Record<string, string> = { ...(headers || {}) };
+    if (options?.includeUnsubscribeHeader) {
+      customHeaders['List-Unsubscribe'] = `<mailto:${mailbox.email}?subject=Unsubscribe>`;
+    }
+
+    const fromHeader = mailbox.name && mailbox.name.trim()
+      ? `"${mailbox.name.replace(/"/g, '')}" <${mailbox.email}>`
+      : mailbox.email;
 
     const info = await transporter.sendMail({
-      from: `"${mailbox.name.replace(/"/g, '')}" <${mailbox.email}>`,
+      from: fromHeader,
       to,
       subject,
-      html: bodyHtml,
-      text: bodyHtml.replace(/<[^>]*>/g, ''),
-      headers: {
-        'X-Mailer': 'OutboundOS High-Deliverability Engine',
-        'List-Unsubscribe': `<mailto:unsubscribe@${domain}>`,
-        ...headers,
-      },
+      ...(options?.plainTextOnly ? {} : { html: bodyHtml }),
+      text: plainText,
+      headers: Object.keys(customHeaders).length > 0 ? customHeaders : undefined,
     });
 
     const previewUrl = nodemailer.getTestMessageUrl(info) || undefined;

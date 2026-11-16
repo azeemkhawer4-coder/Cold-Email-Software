@@ -394,8 +394,16 @@ export const DeliverabilityPage: React.FC<DeliverabilityPageProps> = ({
                           </td>
                           <td className="px-4 py-3 text-[11px]">
                             {job.status === 'sent' ? (
-                              <div className="flex items-center gap-1.5">
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className="text-emerald-400 font-mono">Delivered</span>
+                                {job.openedAt && (
+                                  <span
+                                    className="rounded bg-violet-500/15 border border-violet-500/30 px-1.5 py-0.2 text-[10px] font-mono text-violet-300"
+                                    title={`First opened ${new Date(job.openedAt).toLocaleString()}`}
+                                  >
+                                    Opened{(job.openCount || 0) > 1 ? ` ×${job.openCount}` : ''}
+                                  </span>
+                                )}
                                 {job.previewUrl && (
                                   <a
                                     href={job.previewUrl}
@@ -728,12 +736,12 @@ export const DeliverabilityPage: React.FC<DeliverabilityPageProps> = ({
                 {scanResult ? (
                   <div className="rounded-xl bg-slate-950/80 border border-slate-800/80 p-4 space-y-3 text-xs">
                     <div className="flex items-center justify-between border-b border-slate-800/60 pb-2">
-                      <span className="font-semibold text-slate-200">Spam Score Rating:</span>
+                      <span className="font-semibold text-slate-200">Deliverability Safety Score:</span>
                       <span
                         className={`font-mono font-bold text-sm tabular-nums ${
-                          scanResult.spamScore < 20
+                          scanResult.spamScore >= 85
                             ? 'text-emerald-400'
-                            : scanResult.spamScore < 40
+                            : scanResult.spamScore >= 60
                             ? 'text-amber-400'
                             : 'text-rose-400'
                         }`}
@@ -745,6 +753,17 @@ export const DeliverabilityPage: React.FC<DeliverabilityPageProps> = ({
                     <div className="p-3 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 leading-relaxed text-xs">
                       {scanResult.advice}
                     </div>
+
+                    {Array.isArray(scanResult.detectedIssues) && scanResult.detectedIssues.length > 0 && (
+                      <div>
+                        <span className="text-slate-400 text-[11px] block mb-1">Structural &amp; Header Issues:</span>
+                        <ul className="space-y-1 text-[11px] text-rose-300">
+                          {scanResult.detectedIssues.map((issue: string) => (
+                            <li key={issue}>• {issue}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
 
                     {scanResult.detectedKeywords.length > 0 && (
                       <div>

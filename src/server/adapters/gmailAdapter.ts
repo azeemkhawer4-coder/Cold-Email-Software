@@ -1,5 +1,6 @@
 import { MailboxAccount, MailboxOAuthConfig, FailureType, InboundMessage } from '../../types';
 import { decryptSecret, encryptSecret } from '../db/crypto';
+import { buildMimeEmailString, encodeBase64Url } from '../../utils/emailComposer';
 
 export interface AdapterSendResult {
   success: boolean;
@@ -354,36 +355,20 @@ function buildRfc2822Raw(
   toEmail: string,
   subject: string,
   htmlContent: string,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
+  options?: { textBody?: string; plainTextOnly?: boolean }
 ): string {
-  const messageId = `<outboundos-${Date.now()}.${Math.random().toString(36).substring(2, 9)}@${fromEmail.split('@')[1] || 'gmail.com'}>`;
-
-  const headerLines: string[] = [
-    `From: "${fromName.replace(/"/g, '')}" <${fromEmail}>`,
-    `To: <${toEmail}>`,
-    `Subject: =?UTF-8?B?${Buffer.from(subject, 'utf-8').toString('base64')}?=`,
-    `Date: ${new Date().toUTCString()}`,
-    `Message-ID: ${messageId}`,
-    `MIME-Version: 1.0`,
-    `Content-Type: text/html; charset=UTF-8`,
-    `Content-Transfer-Encoding: base64`,
-    `X-Mailer: OutboundOS Deliverability Engine`,
-  ];
-
-  if (headers) {
-    for (const [k, v] of Object.entries(headers)) {
-      if (v) headerLines.push(`${k}: ${v}`);
-    }
-  }
-
-  const rawString = `${headerLines.join('\r\n')}\r\n\r\n${Buffer.from(htmlContent, 'utf-8').toString('base64')}`;
-
-  // URL-safe base64 encoding without padding
-  return Buffer.from(rawString)
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+  const rawString = buildMimeEmailString({
+    fromName,
+    fromEmail,
+    toEmail,
+    subject,
+    textBody: options?.textBody || htmlContent.replace(/<[^>]*>/g, ''),
+    htmlBody: options?.plainTextOnly ? undefined : htmlContent,
+    plainTextOnly: Boolean(options?.plainTextOnly),
+    headers,
+  });
+  return encodeBase64Url(rawString);
 }
 
 /**
@@ -394,7 +379,8 @@ export async function sendGmailMessage(
   to: string,
   subject: string,
   bodyHtml: string,
-  headers?: Record<string, string>
+  headers?: Record<string, string>,
+  options?: { textBody?: string; plainTextOnly?: boolean }
 ): Promise<AdapterSendResult> {
   let tokenResult = await ensureValidGmailToken(mailbox);
 
@@ -412,7 +398,7 @@ export async function sendGmailMessage(
     };
   }
 
-  const raw = buildRfc2822Raw(mailbox.name, mailbox.email, to, subject, bodyHtml, headers);
+  const raw = buildRfc2822Raw(mailbox.name, mailbox.email, to, subject, bodyHtml, headers, options);
 
   try {
     let res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {

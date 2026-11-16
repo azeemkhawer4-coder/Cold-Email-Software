@@ -171,7 +171,41 @@ export const SendNowModal: React.FC<SendNowModalProps> = ({ campaign, onClose, o
                   ~{summary.estimatedDurationMinutes} minutes ({summary.timezone})
                 </span>
               </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Delivery Format:</span>
+                <span className="font-mono text-slate-200">
+                  {summary.plainTextOnly ? 'Plain Text (High Inbox Placement)' : 'Clean Multipart HTML + Plain Text'}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Open Rate Tracking:</span>
+                <span
+                  className={`font-mono ${
+                    summary.openTrackingActive
+                      ? 'text-emerald-400'
+                      : summary.trackOpens && !summary.plainTextOnly
+                      ? 'text-amber-300'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {summary.plainTextOnly
+                    ? 'Off (Plain-Text Mode)'
+                    : !summary.trackOpens
+                    ? 'Disabled in Campaign'
+                    : summary.openTrackingActive
+                    ? `Active (${summary.trackingBaseUrl})`
+                    : 'Paused (Needs Public HTTPS URL)'}
+                </span>
+              </div>
             </div>
+
+            {summary.trackOpens && !summary.plainTextOnly && !summary.openTrackingActive && (
+              <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-200 text-[11px] leading-relaxed">
+                Open-tracking pixel skipped for localhost to protect Gmail primary-inbox placement. Set a public HTTPS Tracking URL in <strong>Settings</strong> (e.g. Cloudflare Tunnel) to record live open rates externally.
+              </div>
+            )}
 
             {summary.connectedMailboxes.length === 0 && (
               <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] flex items-center gap-2">

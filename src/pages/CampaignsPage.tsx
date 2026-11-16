@@ -273,6 +273,7 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
               <th className="py-2.5 px-4 font-semibold text-slate-300">Sequence Structure</th>
               <th className="py-2.5 px-4 font-semibold text-slate-300">Enrolled</th>
               <th className="py-2.5 px-4 font-semibold text-slate-300">Sent</th>
+              <th className="py-2.5 px-4 font-semibold text-slate-300">Opens</th>
               <th className="py-2.5 px-4 font-semibold text-slate-300">Replies</th>
               <th className="py-2.5 px-4 font-semibold text-slate-300">Meetings</th>
               <th className="py-2.5 px-4 font-semibold text-slate-300 text-right">Actions</th>
@@ -287,6 +288,8 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
               const enrolled = camp.stats?.enrolled ?? camp.stats?.totalLeads ?? 0;
               const sent = camp.stats?.sent ?? camp.stats?.sentCount ?? 0;
               const delivered = camp.stats?.delivered ?? camp.stats?.deliveredCount ?? 0;
+              const opened = camp.stats?.opened ?? camp.stats?.openCount ?? 0;
+              const openRatePct = sent > 0 ? ((opened / sent) * 100).toFixed(1) : '0.0';
               const replied = camp.stats?.replied ?? camp.stats?.replyCount ?? 0;
               const positiveReplies = camp.stats?.positiveReplies ?? camp.stats?.interestedCount ?? 0;
               const meetingsBooked = camp.stats?.meetingsBooked ?? camp.stats?.meetingCount ?? 0;
@@ -354,6 +357,10 @@ export const CampaignsPage: React.FC<CampaignsPageProps> = ({
                   <td className="py-3 px-4">
                     <span className="text-slate-100 font-mono font-medium tabular-nums">{sent}</span>
                     <span className="text-slate-500 text-[10px] block font-mono">({delivered} delivered)</span>
+                  </td>
+                  <td className="py-3 px-4">
+                    <span className="text-violet-400 font-mono font-semibold tabular-nums">{openRatePct}%</span>
+                    <span className="text-slate-500 text-[10px] block font-mono">({opened} opened)</span>
                   </td>
                   <td className="py-3 px-4">
                     <span className="text-indigo-400 font-mono font-semibold tabular-nums">{replied}</span>
@@ -651,6 +658,11 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
   );
   const [stopOnReply, setStopOnReply] = useState(campaign?.settings?.stopOnReply !== false);
   const [stopOnUnsubscribe, setStopOnUnsubscribe] = useState(campaign?.settings?.stopOnUnsubscribe !== false);
+  const [trackOpens, setTrackOpens] = useState(campaign?.settings?.trackOpens !== false);
+  const [plainTextOnly, setPlainTextOnly] = useState(Boolean(campaign?.settings?.plainTextOnly));
+  const [includeComplianceFooter, setIncludeComplianceFooter] = useState(
+    Boolean(campaign?.settings?.includeComplianceFooter)
+  );
 
   const [sendingDays, setSendingDays] = useState<number[]>(
     campaign?.schedule?.sendingDays || [1, 2, 3, 4, 5]
@@ -915,9 +927,10 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
         mailboxRotation,
         stopOnReply,
         stopOnUnsubscribe,
-        trackOpens: true,
-        trackClicks: true,
-        plainTextOnly: false,
+        trackOpens: plainTextOnly ? false : trackOpens,
+        trackClicks: false,
+        plainTextOnly,
+        includeComplianceFooter,
       },
       steps,
     };
@@ -1040,7 +1053,9 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
               </button>
             ))}
             <button
+              type="button"
               onClick={onClose}
+              aria-label="Close campaign builder"
               className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 ml-2 cursor-pointer"
             >
               <X className="h-4 w-4" />
@@ -1860,6 +1875,62 @@ const CampaignBuilderWizard: React.FC<WizardProps> = ({
                     <span className="text-slate-500 font-mono">sec</span>
                   </div>
                 </div>
+              </div>
+
+              {/* Deliverability, Open Tracking & Format Controls */}
+              <div className="surface-card rounded-xl p-5 space-y-3">
+                <h3 className="text-sm font-semibold text-white tracking-tight">Deliverability &amp; Open Rate Tracking</h3>
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!plainTextOnly && trackOpens}
+                    disabled={plainTextOnly}
+                    onChange={(e) => setTrackOpens(e.target.checked)}
+                    className="mt-0.5 rounded border-slate-700 text-blue-600 disabled:opacity-40"
+                  />
+                  <div>
+                    <span className="text-slate-200 font-medium block">
+                      Track Email Open Rate (1x1 transparent pixel)
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      Records unique recipient opens when a public HTTPS Tracking URL is configured in Settings. Localhost links are automatically skipped to avoid spam penalties.
+                    </span>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={plainTextOnly}
+                    onChange={(e) => setPlainTextOnly(e.target.checked)}
+                    className="mt-0.5 rounded border-slate-700 text-blue-600"
+                  />
+                  <div>
+                    <span className="text-slate-200 font-medium block">
+                      Plain-Text Only Mode (Highest Primary Inbox Placement)
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      Sends pure text/plain email with zero HTML tags or tracking pixels — ideal if strict spam filters reject HTML outreach.
+                    </span>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeComplianceFooter}
+                    onChange={(e) => setIncludeComplianceFooter(e.target.checked)}
+                    className="mt-0.5 rounded border-slate-700 text-blue-600"
+                  />
+                  <div>
+                    <span className="text-slate-200 font-medium block">
+                      Append Workspace Address &amp; Opt-Out Footer
+                    </span>
+                    <span className="text-[11px] text-slate-400">
+                      Keep disabled for natural 1:1 personal cold outreach. Only appends custom address/footer if set in Workspace Settings.
+                    </span>
+                  </div>
+                </label>
               </div>
 
               {/* Safeguards Checkboxes */}

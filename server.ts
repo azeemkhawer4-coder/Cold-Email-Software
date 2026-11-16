@@ -45,6 +45,12 @@ import { enrollAllActiveCampaigns, enrollCampaignLeadsIntoQueue, isWithinSchedul
 import { validateEmailSyntax, parseCsvRows, autoDetectColumnMappings } from './src/utils/emailValidator';
 import { isProductionConnectedMailbox } from './src/utils/senderRotation';
 import { assignLeadsToList, recalculateListLeadCounts } from './src/utils/listAssignment';
+import { analyzeEmailSpamRisk } from './src/utils/emailComposer';
+import {
+  TRANSPARENT_GIF_BUFFER,
+  recordOpenEventForState,
+  resolveTrackingBaseUrl,
+} from './src/utils/openTracking';
 import { Lead, Campaign, MailboxAccount, Deal, Automation, Company, Task, ZeroCostStatus } from './src/types';
 
 dotenv.config();
@@ -234,6 +240,7 @@ app.use('/api', (req: Request, res: Response, next) => {
   if (
     req.path.startsWith('/auth') ||
     req.path.startsWith('/unsubscribe') ||
+    req.path.startsWith('/track') ||
     req.path === '/health'
   ) {
     return next();
@@ -885,8 +892,9 @@ app.post('/api/campaigns', (req: Request, res: Response) => {
       stopOnReply: true,
       stopOnUnsubscribe: true,
       trackOpens: true,
-      trackClicks: true,
+      trackClicks: false,
       plainTextOnly: false,
+      includeComplianceFooter: false,
     },
     steps: req.body.steps || [
       {
@@ -1078,6 +1086,13 @@ app.get('/api/campaigns/:id/prelaunch-summary', (req: Request, res: Response) =>
   const estimatedDurationMinutes = Math.ceil(totalEstimatedSeconds / 60);
 
   const pendingJobsCount = db.sendingJobs.filter((j) => j.campaignId === camp.id && (j.status === 'queued' || j.status === 'retrying')).length;
+  const trackingBaseUrl = resolveTrackingBaseUrl(
+    db.workspace?.trackingBaseUrl,
+    process.env.PUBLIC_APP_URL || process.env.APP_URL
+  );
+  const trackOpens = camp.settings?.trackOpens !== false;
+  const plainTextOnly = Boolean(camp.settings?.plainTextOnly);
+  const includeComplianceFooter = Boolean(camp.settings?.includeComplianceFooter);
 
   res.json({
     campaignId: camp.id,
@@ -1111,6 +1126,11 @@ app.get('/api/campaigns/:id/prelaunch-summary', (req: Request, res: Response) =>
     dailyWindow: `${camp.schedule?.startTime || '09:00'} - ${camp.schedule?.endTime || '17:00'}`,
     dailyLimit: camp.settings?.dailyLimit || 50,
     queueCount: pendingJobsCount,
+    trackOpens,
+    plainTextOnly,
+    includeComplianceFooter,
+    trackingBaseUrl: trackingBaseUrl || null,
+    openTrackingActive: Boolean(trackOpens && !plainTextOnly && trackingBaseUrl),
   });
 });
 
@@ -1221,7 +1241,7 @@ app.post('/api/mailboxes', (req: Request, res: Response) => {
     warmupStatus: 'active',
     warmupScore: 94,
     healthScore: 97,
-    signature: req.body.signature || '--\nBest regards,\nApex Outbound',
+    signature: typeof req.body.signature === 'string' ? req.body.signature : '',
     smtpHost: req.body.smtpHost,
     smtpPort: req.body.smtpPort ? parseInt(req.body.smtpPort) : 587,
     smtpUser: req.body.smtpUser,
@@ -1696,42 +1716,42 @@ app.get('/api/deliverability', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/deliverability/check-content', (req: Request, res: Response) => {
-  const { subject, body } = req.body;
-  const content = `${subject || ''} ${body || ''}`.toLowerCase();
-
-  const spamTriggers = [
-    'free',
-    'guarantee',
-    '100% free',
-    'earn money',
-    'risk-free',
-    'no catch',
-    'miracle',
-    'urgent',
-    'act now',
-    'winner',
-    'credit card',
-    'congratulations',
-  ];
-
-  const detected: string[] = [];
-  for (const trigger of spamTriggers) {
-    if (content.includes(trigger)) {
-      detected.push(trigger);
+app.get('/api/track/open/:token', (req: Request, res: Response) => {
+  try {
+    const db = getDatabase();
+    const result = recordOpenEventForState({
+      tokenOrJobId: req.params.token,
+      workspaceId: db.workspace.id,
+      sendingJobs: db.sendingJobs,
+      campaigns: db.campaigns,
+      sendingEvents: db.sendingEvents,
+      userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : undefined,
+    });
+    if (result.matched) {
+      saveDatabase(db);
     }
+  } catch (err) {
+    console.warn('[OpenTracking] Failed to record open event:', err);
   }
 
-  const score = Math.max(0, 100 - detected.length * 15);
-  res.json({
-    spamScore: score,
-    detectedKeywords: detected,
-    status: score >= 85 ? 'safe' : score >= 60 ? 'moderate_risk' : 'high_risk',
-    advice:
-      detected.length === 0
-        ? 'Copy passes deliverability spam filter checks. Tone is natural and professional.'
-        : `Consider removing spam-trigger phrases: "${detected.join('", "')}".`,
+  res.setHeader('Content-Type', 'image/gif');
+  res.setHeader('Content-Length', String(TRANSPARENT_GIF_BUFFER.length));
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.status(200).send(TRANSPARENT_GIF_BUFFER);
+});
+
+app.post('/api/deliverability/check-content', (req: Request, res: Response) => {
+  const { subject, body } = req.body;
+  const db = getDatabase();
+  const audit = analyzeEmailSpamRisk({
+    subject,
+    body,
+    physicalAddress: db.workspace?.physicalAddress,
+    unsubscribeFooter: db.workspace?.unsubscribeFooter,
   });
+  res.json(audit);
 });
 
 // ==========================================

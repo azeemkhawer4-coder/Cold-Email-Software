@@ -321,6 +321,8 @@ test('computeAnalyticsSummary aggregates real production senders, 7-day job seri
   assert.equal(summary.totalDailyProductionCapacity, 50);
   assert.equal(summary.totalSentTodayProduction, 4);
   assert.equal(summary.totalSent, 2);
+  assert.equal(summary.totalOpened, 1);
+  assert.equal(summary.openRate, 50);
   assert.equal(summary.totalReplies, 1);
   assert.equal(summary.replyRate, 50);
   assert.equal(summary.openPipelineValue, 12000);

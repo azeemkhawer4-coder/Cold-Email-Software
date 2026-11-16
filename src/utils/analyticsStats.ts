@@ -28,6 +28,8 @@ export interface VariantPerformanceRow {
   name: string;
   subject: string;
   sentCount: number;
+  openCount: number;
+  openRate: number;
   replyCount: number;
   replyRate: number;
 }
@@ -49,6 +51,7 @@ export interface AnalyticsSummary {
   totalMeetings: number;
   totalBounced: number;
   totalUnsubscribed: number;
+  openRate: number;
   replyRate: number;
   positiveReplyRate: number;
   bounceRate: number;
@@ -107,6 +110,7 @@ export function computeAnalyticsSummary(input: {
   const campUnsub = campaigns.reduce((acc, c) => acc + (c.stats?.unsubscribed || 0), 0);
 
   const sentJobs = sendingJobs.filter((j) => j.status === 'sent');
+  const openedJobs = sentJobs.filter((j) => Boolean(j.openedAt || (j.openCount && j.openCount > 0)));
   const bouncedJobs = sendingJobs.filter((j) => j.status === 'bounced');
   const inboundConversations = conversations.filter((c) =>
     c.messages.some((m) => m.isInbound)
@@ -119,13 +123,14 @@ export function computeAnalyticsSummary(input: {
 
   const totalSent = Math.max(campSent, sentJobs.length);
   const totalDelivered = Math.max(campDelivered, sentJobs.length);
-  const totalOpened = campOpened;
+  const totalOpened = Math.min(totalSent, Math.max(campOpened, openedJobs.length));
   const totalReplies = Math.max(campReplied, inboundConversations.length);
   const positiveReplies = Math.max(campPositive, positiveConversations.length);
   const totalMeetings = Math.max(campMeetings, meetingConversations.length);
   const totalBounced = Math.max(campBounced, bouncedJobs.length);
   const totalUnsubscribed = campUnsub;
 
+  const openRate = totalSent > 0 ? Number(((totalOpened / totalSent) * 100).toFixed(1)) : 0;
   const replyRate = totalSent > 0 ? Number(((totalReplies / totalSent) * 100).toFixed(1)) : 0;
   const positiveReplyRate = totalSent > 0 ? Number(((positiveReplies / totalSent) * 100).toFixed(1)) : 0;
   const bounceRate = totalSent > 0 ? Number(((totalBounced / totalSent) * 100).toFixed(1)) : 0;
@@ -161,6 +166,11 @@ export function computeAnalyticsSummary(input: {
     if (job.status === 'sent') {
       bucket.sent++;
       bucket.delivered++;
+      if (job.openedAt) {
+        const openKey = job.openedAt.split('T')[0];
+        const openBucket = dayBuckets.get(openKey);
+        if (openBucket) openBucket.opened++;
+      }
     } else if (job.status === 'bounced') {
       bucket.bounced++;
     }
@@ -189,8 +199,12 @@ export function computeAnalyticsSummary(input: {
         const v = step.emailData.variants[i];
         const jobsForVariant = sentJobs.filter(
           (j) => j.campaignId === camp.id && j.variantId === v.id
+        );
+        const sentCount = Math.max(v.sentCount || 0, jobsForVariant.length);
+        const openedJobsForVariant = jobsForVariant.filter(
+          (j) => Boolean(j.openedAt || (j.openCount && j.openCount > 0))
         ).length;
-        const sentCount = Math.max(v.sentCount || 0, jobsForVariant);
+        const openCount = Math.min(sentCount, Math.max(v.openCount || 0, openedJobsForVariant));
         const replyCount = v.replyCount || 0;
         variantResults.push({
           campaignId: camp.id,
@@ -200,6 +214,8 @@ export function computeAnalyticsSummary(input: {
           name: v.name || `Variant ${String.fromCharCode(65 + i)}`,
           subject: v.subject || step.emailData.subject,
           sentCount,
+          openCount,
+          openRate: sentCount > 0 ? Number(((openCount / sentCount) * 100).toFixed(1)) : 0,
           replyCount,
           replyRate: sentCount > 0 ? Number(((replyCount / sentCount) * 100).toFixed(1)) : 0,
         });
@@ -228,6 +244,7 @@ export function computeAnalyticsSummary(input: {
     totalMeetings,
     totalBounced,
     totalUnsubscribed,
+    openRate,
     replyRate,
     positiveReplyRate,
     bounceRate,

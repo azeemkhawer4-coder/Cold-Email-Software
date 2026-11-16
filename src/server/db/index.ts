@@ -20,6 +20,10 @@ import {
   Task,
 } from '../../types';
 import { reconcileCompanies, reconcileLeadLists } from '../../utils/analyticsStats';
+import {
+  isLegacyBoilerplateAddress,
+  isLegacyBoilerplateFooter,
+} from '../../utils/emailComposer';
 
 export interface DatabaseSchema {
   workspace: WorkspaceSettings;
@@ -113,14 +117,15 @@ function seedInitialDataIfEmpty(db: Database.Database): void {
 
   const workspace: WorkspaceSettings = {
     id: 'ws-apex-01',
-    name: 'Apex Growth Labs',
-    companyName: 'Apex Growth Technologies Inc.',
+    name: 'OutboundOS Workspace',
+    companyName: '',
     ownerEmail: 'azeemkhawer4@gmail.com',
     timezone: 'America/Chicago',
-    physicalAddress: '548 Market St, Suite 39201, San Francisco, CA 94104',
-    unsubscribeFooter: 'You received this email because we identified synergy with your role. If you prefer not to receive future updates, click here to unsubscribe.',
+    physicalAddress: '',
+    unsubscribeFooter: '',
     complianceMode: 'strict',
     globalSuppressionCount: 0,
+    trackingBaseUrl: '',
   };
 
   const now = new Date().toISOString();
@@ -160,15 +165,24 @@ export function getDatabase(): DatabaseSchema {
     const wsRow = db.prepare('SELECT data FROM workspaces LIMIT 1').get() as { data: string } | undefined;
     const workspace: WorkspaceSettings = wsRow ? JSON.parse(wsRow.data) : {
       id: 'ws-apex-01',
-      name: 'Apex Growth Labs',
-      companyName: 'Apex Growth Technologies Inc.',
+      name: 'OutboundOS Workspace',
+      companyName: '',
       ownerEmail: 'azeemkhawer4@gmail.com',
       timezone: 'America/Chicago',
-      physicalAddress: '548 Market St, San Francisco, CA',
-      unsubscribeFooter: 'Click here to unsubscribe.',
+      physicalAddress: '',
+      unsubscribeFooter: '',
       complianceMode: 'strict',
       globalSuppressionCount: 0,
+      trackingBaseUrl: '',
     };
+
+    // Strip untouched legacy spam-trigger boilerplate defaults if present
+    if (isLegacyBoilerplateAddress(workspace.physicalAddress)) {
+      workspace.physicalAddress = '';
+    }
+    if (isLegacyBoilerplateFooter(workspace.unsubscribeFooter)) {
+      workspace.unsubscribeFooter = '';
+    }
 
     // 2. Leads
     const leadRows = db.prepare('SELECT data FROM leads ORDER BY created_at DESC').all() as { data: string }[];
@@ -255,6 +269,29 @@ export function getDatabase(): DatabaseSchema {
     // 13. Audit logs
     const auditRows = db.prepare('SELECT id, action, details_json as details, created_at as timestamp FROM audit_logs ORDER BY created_at DESC LIMIT 100').all() as any[];
 
+    // 14. Sending events (opens, sends, clicks, bounces)
+    const eventRows = db
+      .prepare('SELECT id, campaign_id, lead_id, mailbox_id, event_type, timestamp, metadata FROM sending_events ORDER BY timestamp DESC')
+      .all() as {
+      id: string;
+      campaign_id?: string | null;
+      lead_id?: string | null;
+      mailbox_id?: string | null;
+      event_type: SendingEvent['eventType'];
+      timestamp: string;
+      metadata?: string | null;
+    }[];
+    const sendingEvents: SendingEvent[] = eventRows.map((r) => ({
+      id: r.id,
+      workspaceId: workspace.id,
+      campaignId: r.campaign_id || '',
+      leadId: r.lead_id || '',
+      mailboxId: r.mailbox_id || '',
+      eventType: r.event_type,
+      timestamp: r.timestamp,
+      metadata: r.metadata ? JSON.parse(r.metadata) : undefined,
+    }));
+
     dbCache = {
       workspace,
       leads,
@@ -268,7 +305,7 @@ export function getDatabase(): DatabaseSchema {
       automations,
       sendingJobs,
       failureReports: [],
-      sendingEvents: [],
+      sendingEvents,
       suppressionList: suppRows,
       auditLogs: auditRows,
     };
@@ -661,6 +698,26 @@ export function saveDatabase(data: DatabaseSchema): void {
           s.reason || 'Unsubscribe',
           'auto',
           s.addedAt || now
+        );
+      }
+    }
+
+    // 12. Sending Events (opens, sends, clicks, bounces)
+    if (Array.isArray(data.sendingEvents)) {
+      const upsertEvent = db.prepare(`
+        INSERT OR REPLACE INTO sending_events (id, campaign_id, step_id, lead_id, mailbox_id, event_type, timestamp, metadata)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const ev of data.sendingEvents.slice(-5000)) {
+        upsertEvent.run(
+          ev.id,
+          ev.campaignId || null,
+          ev.metadata?.stepId || null,
+          ev.leadId || null,
+          ev.mailboxId || null,
+          ev.eventType,
+          ev.timestamp || now,
+          ev.metadata ? JSON.stringify(ev.metadata) : null
         );
       }
     }

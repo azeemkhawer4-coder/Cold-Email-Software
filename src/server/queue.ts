@@ -41,6 +41,10 @@ export function enqueueJob(
     idempotencyKey?: string;
     variantId?: string;
     variantName?: string;
+    trackingToken?: string;
+    trackOpens?: boolean;
+    plainTextOnly?: boolean;
+    includeComplianceFooter?: boolean;
   }
 ): { job: SendingJob; isDuplicate: boolean } {
   const db = getDatabase();
@@ -72,6 +76,11 @@ export function enqueueJob(
     body: jobData.body,
     variantId: jobData.variantId,
     variantName: jobData.variantName,
+    trackingToken: jobData.trackingToken,
+    trackOpens: jobData.trackOpens,
+    plainTextOnly: jobData.plainTextOnly,
+    includeComplianceFooter: jobData.includeComplianceFooter,
+    openCount: 0,
     scheduledAt: jobData.scheduledAt,
     status: 'queued',
     attempts: 0,

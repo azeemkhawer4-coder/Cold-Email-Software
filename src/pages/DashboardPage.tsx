@@ -13,6 +13,7 @@ import {
   Briefcase,
   AlertTriangle,
   DollarSign,
+  Eye,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -82,10 +83,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     day: pt.label,
     sent: pt.sent,
     delivered: pt.delivered,
+    opened: pt.opened,
     replies: pt.replied,
   }));
 
-  const hasChartActivity = chartData.some((d) => d.sent > 0 || d.delivered > 0 || d.replies > 0);
+  const hasChartActivity = chartData.some((d) => d.sent > 0 || d.delivered > 0 || d.opened > 0 || d.replies > 0);
   const showWorkerPausedWarning =
     summary.activeCampaignsCount > 0 && workerStatus && !workerStatus.sendingActive;
 
@@ -145,7 +147,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       )}
 
       {/* KPI Cards Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
         <div className="surface-card surface-card-hover rounded-xl p-4 transition-all duration-150">
           <div className="flex items-center justify-between text-slate-400">
             <span className="text-xs font-medium">Total Leads</span>
@@ -172,6 +174,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
           <div className="mt-1 text-[11px] text-slate-400">
             <span className="text-cyan-400 font-mono font-medium">{summary.totalDelivered}</span> accepted
+          </div>
+        </div>
+
+        <div className="surface-card surface-card-hover rounded-xl p-4 transition-all duration-150">
+          <div className="flex items-center justify-between text-slate-400">
+            <span className="text-xs font-medium">Open Rate</span>
+            <Eye className="h-4 w-4 text-violet-400" />
+          </div>
+          <div className="mt-2 text-2xl font-bold tracking-tight text-white font-mono tabular-nums">
+            {summary.openRate.toFixed(1)}%
+          </div>
+          <div className="mt-1 text-[11px] text-slate-400">
+            <span className="text-violet-400 font-mono font-medium">{summary.totalOpened}</span> unique opens
           </div>
         </div>
 
@@ -256,6 +271,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <span className="flex items-center gap-1.5 text-slate-300">
                 <span className="h-2 w-2 rounded-full bg-cyan-400" /> Accepted
               </span>
+              <span className="flex items-center gap-1.5 text-slate-300">
+                <span className="h-2 w-2 rounded-full bg-violet-400" /> Opened
+              </span>
             </div>
           </div>
           <div className="h-64 w-full relative">
@@ -269,6 +287,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   <linearGradient id="delivGrad" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.35} />
                     <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="openGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.35} />
+                    <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" opacity={0.6} />
@@ -297,6 +319,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   strokeWidth={2}
                   fillOpacity={1}
                   fill="url(#delivGrad)"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="opened"
+                  stroke="#8b5cf6"
+                  strokeWidth={2}
+                  fillOpacity={1}
+                  fill="url(#openGrad)"
                 />
               </AreaChart>
             </ResponsiveContainer>
@@ -478,14 +508,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
         {/* Campaign Performance Ranking */}
         <div className="surface-card rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between gap-2 mb-4">
             <div>
               <h3 className="text-sm font-semibold text-white">Campaign Performance</h3>
               <p className="text-xs text-slate-400">Active outreach campaigns and conversion metrics</p>
             </div>
             <button
               onClick={onOpenCreateCampaign}
-              className="text-xs font-medium text-blue-400 hover:text-blue-300 cursor-pointer"
+              className="shrink-0 whitespace-nowrap text-xs font-medium text-blue-400 hover:text-blue-300 cursor-pointer"
             >
               + New Campaign
             </button>
@@ -495,7 +525,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             {safeCampaigns.map((camp) => {
               const stepCount = (camp.steps || (camp as any).sequenceSteps || []).length;
               const sent = camp.stats?.sent ?? camp.stats?.sentCount ?? 0;
-              const delivered = camp.stats?.delivered ?? camp.stats?.deliveredCount ?? 0;
+              const opened = camp.stats?.opened ?? camp.stats?.openCount ?? 0;
+              const campOpenRate = sent > 0 ? Math.round((opened / sent) * 100) : 0;
               const replied = camp.stats?.replied ?? camp.stats?.replyCount ?? 0;
               const meetings = camp.stats?.meetingsBooked ?? camp.stats?.meetingCount ?? 0;
 
@@ -531,8 +562,10 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                       <span className="font-semibold text-slate-200 font-mono tabular-nums">{sent}</span>
                     </div>
                     <div>
-                      <span className="text-[10px] text-slate-400 block">Delivered</span>
-                      <span className="font-semibold text-cyan-400 font-mono tabular-nums">{delivered}</span>
+                      <span className="text-[10px] text-slate-400 block">Open Rate</span>
+                      <span className="font-semibold text-violet-400 font-mono tabular-nums">
+                        {campOpenRate}% <span className="text-[10px] text-slate-500">({opened})</span>
+                      </span>
                     </div>
                     <div>
                       <span className="text-[10px] text-slate-400 block">Replies</span>

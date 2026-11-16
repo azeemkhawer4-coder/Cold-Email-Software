@@ -23,6 +23,12 @@ import {
 } from './queue';
 import { enrollAllActiveCampaigns } from './scheduler';
 import { selectNextMailbox } from '../utils/senderRotation';
+import { composeOutboundEmail } from '../utils/emailComposer';
+import {
+  buildOpenTrackingPixelUrl,
+  generateTrackingToken,
+  resolveTrackingBaseUrl,
+} from '../utils/openTracking';
 
 export interface SendResult {
   success: boolean;
@@ -43,7 +49,8 @@ export async function dispatchRealEmail(
   to: string,
   subject: string,
   htmlOrText: string,
-  trackingHeaders?: Record<string, string>
+  trackingHeaders?: Record<string, string>,
+  options?: { textBody?: string; plainTextOnly?: boolean; includeUnsubscribeHeader?: boolean }
 ): Promise<SendResult> {
   const db = getDatabase();
   const mailbox = db.mailboxes.find((m) => m.id === mailboxId);
@@ -71,11 +78,11 @@ export async function dispatchRealEmail(
   let result: AdapterSendResult & { previewUrl?: string };
 
   if (mailbox.provider === 'gmail') {
-    result = await sendGmailMessage(mailbox, to, subject, htmlOrText, trackingHeaders);
+    result = await sendGmailMessage(mailbox, to, subject, htmlOrText, trackingHeaders, options);
   } else if (mailbox.provider === 'outlook') {
     result = await sendMicrosoftGraphMessage(mailbox, to, subject, htmlOrText, trackingHeaders);
   } else {
-    result = await sendSmtpMessage(mailbox, to, subject, htmlOrText, trackingHeaders);
+    result = await sendSmtpMessage(mailbox, to, subject, htmlOrText, trackingHeaders, options);
   }
 
   return {
@@ -175,11 +182,51 @@ export async function processOutboundSendingBatch(): Promise<{
     // Atomically mark processing
     markJobProcessing(job.id);
 
-    // Real email dispatch
-    const result = await dispatchRealEmail(mailbox.id, job.leadEmail, job.subject, job.body, {
-      'X-OutboundOS-Job-ID': job.id,
-      'X-OutboundOS-Campaign-ID': job.campaignId,
+    const plainTextOnly =
+      typeof job.plainTextOnly === 'boolean'
+        ? job.plainTextOnly
+        : Boolean(campaign?.settings?.plainTextOnly);
+    const trackOpens =
+      typeof job.trackOpens === 'boolean'
+        ? job.trackOpens
+        : campaign?.settings?.trackOpens !== false;
+    const includeComplianceFooter =
+      typeof job.includeComplianceFooter === 'boolean'
+        ? job.includeComplianceFooter
+        : Boolean(campaign?.settings?.includeComplianceFooter);
+
+    if (!job.trackingToken) {
+      job.trackingToken = generateTrackingToken();
+    }
+
+    const trackingBaseUrl = resolveTrackingBaseUrl(
+      db.workspace?.trackingBaseUrl,
+      process.env.PUBLIC_APP_URL || process.env.APP_URL
+    );
+    const trackingPixelUrl =
+      trackOpens && !plainTextOnly && trackingBaseUrl
+        ? buildOpenTrackingPixelUrl(trackingBaseUrl, job.trackingToken)
+        : undefined;
+
+    const composed = composeOutboundEmail({
+      body: job.body,
+      plainTextOnly,
+      trackingPixelUrl,
     });
+
+    // Real email dispatch without automation fingerprint headers (X-OutboundOS-* / X-Mailer)
+    const result = await dispatchRealEmail(
+      mailbox.id,
+      job.leadEmail,
+      job.subject,
+      composed.htmlBody || composed.textBody,
+      undefined,
+      {
+        textBody: composed.textBody,
+        plainTextOnly,
+        includeUnsubscribeHeader: includeComplianceFooter,
+      }
+    );
 
     if (result.success) {
       // Mark job sent

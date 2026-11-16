@@ -3,6 +3,8 @@ import { Campaign, CampaignSchedule, Lead, CampaignStep, SendingJob, EmailVarian
 import { enqueueJob } from './queue';
 import { interpolateTemplate } from '../utils/templateEngine';
 import { selectNextMailbox } from '../utils/senderRotation';
+import { composeOutboundEmail } from '../utils/emailComposer';
+import { generateTrackingToken } from '../utils/openTracking';
 
 /**
  * Extracts YYYY-MM-DD, day-of-week (1=Mon..7=Sun), and minutes since midnight
@@ -331,8 +333,20 @@ export function enrollCampaignLeadsIntoQueue(campaign: Campaign, now = new Date(
     const personalizedSubject = interpolateTemplate(rawSubject, lead);
     const personalizedBody = interpolateTemplate(rawBody, lead);
 
-    // Append signature, physical compliance address, and unsubscribe footer
-    const fullBody = `${personalizedBody}\n\n--\n${mailbox.signature || ''}\n\n${db.workspace.physicalAddress}\n${db.workspace.unsubscribeFooter}`;
+    const includeComplianceFooter = Boolean(campaign.settings?.includeComplianceFooter);
+    const plainTextOnly = Boolean(campaign.settings?.plainTextOnly);
+    const trackOpens = campaign.settings?.trackOpens !== false;
+    const trackingToken = generateTrackingToken();
+
+    // Compose clean body without legacy spam boilerplate or duplicate "-- --" separators
+    const composedPreview = composeOutboundEmail({
+      body: personalizedBody,
+      signature: mailbox.signature,
+      physicalAddress: db.workspace.physicalAddress,
+      unsubscribeFooter: db.workspace.unsubscribeFooter,
+      includeComplianceFooter,
+      plainTextOnly: true,
+    });
 
     const { isDuplicate } = enqueueJob({
       workspaceId: db.workspace.id,
@@ -348,7 +362,11 @@ export function enrollCampaignLeadsIntoQueue(campaign: Campaign, now = new Date(
       variantId: chosenVariant?.id,
       variantName: chosenVariant?.name,
       subject: personalizedSubject,
-      body: fullBody,
+      body: composedPreview.textBody,
+      trackingToken,
+      trackOpens,
+      plainTextOnly,
+      includeComplianceFooter,
       scheduledAt,
       maxAttempts: 3,
     });

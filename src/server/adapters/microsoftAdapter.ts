@@ -81,9 +81,7 @@ export async function sendMicrosoftGraphMessage(
   }
 
   try {
-    const internetMessageHeaders: { name: string; value: string }[] = [
-      { name: 'X-Mailer', value: 'OutboundOS Deliverability Engine' },
-    ];
+    const internetMessageHeaders: { name: string; value: string }[] = [];
 
     if (headers) {
       for (const [k, v] of Object.entries(headers)) {

@@ -57,6 +57,7 @@ export interface EmailVariant {
   body: string;
   weight: number; // percentage (e.g. 50)
   sentCount: number;
+  openCount?: number;
   replyCount: number;
 }
 
@@ -103,6 +104,7 @@ export interface CampaignSettings {
   trackOpens: boolean;
   trackClicks: boolean;
   plainTextOnly: boolean;
+  includeComplianceFooter?: boolean;
 }
 
 export interface CampaignStats {
@@ -361,6 +363,13 @@ export interface SendingJob {
   variantId?: string;
   variantName?: string;
   previewUrl?: string; // Preview URL for test mailboxes (Ethereal)
+  trackingToken?: string;
+  trackOpens?: boolean;
+  plainTextOnly?: boolean;
+  includeComplianceFooter?: boolean;
+  openedAt?: string;
+  lastOpenedAt?: string;
+  openCount?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -424,6 +433,7 @@ export interface WorkspaceSettings {
   companyName: string;
   complianceMode: 'gdpr' | 'canspam' | 'strict';
   globalSuppressionCount: number;
+  trackingBaseUrl?: string;
 }
 
 export interface Company {
