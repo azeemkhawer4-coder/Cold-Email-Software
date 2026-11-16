@@ -16,18 +16,33 @@ import {
   FlaskConical,
   ArrowDownLeft,
   RefreshCw,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { MailboxAccount } from '../types';
 import { isProductionMailboxConnected } from '../utils/analyticsStats';
+import { OAuthFeedback } from '../utils/oauthHash';
 
 interface EmailAccountsPageProps {
   mailboxes: MailboxAccount[];
   onRefreshMailboxes: () => void;
+  oauthFeedback?: OAuthFeedback | null;
+  onClearOAuthFeedback?: () => void;
+}
+
+interface GoogleOAuthStatusInfo {
+  configured: boolean;
+  hasClientId: boolean;
+  hasClientSecret: boolean;
+  redirectUri: string;
+  origin: string;
 }
 
 export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
   mailboxes,
   onRefreshMailboxes,
+  oauthFeedback,
+  onClearOAuthFeedback,
 }) => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingMailbox, setEditingMailbox] = useState<MailboxAccount | null>(null);
@@ -38,6 +53,20 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
   const [syncResult, setSyncResult] = useState<{ id: string; message: string; success: boolean } | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   const [mailboxToDelete, setMailboxToDelete] = useState<{ id: string; email: string } | null>(null);
+  const [checkingOAuthTarget, setCheckingOAuthTarget] = useState<string | null>(null);
+  const [googleOAuthSetupModal, setGoogleOAuthSetupModal] = useState<
+    (GoogleOAuthStatusInfo & { targetMailbox?: MailboxAccount }) | null
+  >(null);
+  const [appPasswordTarget, setAppPasswordTarget] = useState<MailboxAccount | null>(null);
+  const [connectDefaults, setConnectDefaults] = useState<{
+    provider?: 'gmail' | 'outlook' | 'smtp';
+    email?: string;
+    name?: string;
+    smtpHost?: string;
+    smtpPort?: number;
+    imapHost?: string;
+    imapPort?: number;
+  } | null>(null);
 
   const connectedProdMailboxes = mailboxes.filter(isProductionMailboxConnected);
   const reauthMailboxes = mailboxes.filter(
@@ -47,6 +76,30 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
     (acc, m) => acc + (m.dailyLimit || 0),
     0
   );
+
+  const handleConnectGoogleOAuth = async (targetMailbox?: MailboxAccount) => {
+    const trackingKey = targetMailbox ? targetMailbox.id : 'global';
+    setCheckingOAuthTarget(trackingKey);
+    setPageError(null);
+    try {
+      const res = await fetch('/api/auth/google/status');
+      const statusData: GoogleOAuthStatusInfo = await res.json();
+      if (res.ok && statusData.configured) {
+        const query = targetMailbox?.email ? `?email=${encodeURIComponent(targetMailbox.email)}` : '';
+        window.location.href = `/api/auth/google${query}`;
+        return;
+      }
+      setShowAddModal(false);
+      setGoogleOAuthSetupModal({
+        ...statusData,
+        targetMailbox,
+      });
+    } catch (err: any) {
+      setPageError(err?.message || 'Could not check Google OAuth configuration status.');
+    } finally {
+      setCheckingOAuthTarget(null);
+    }
+  };
 
   const handleTestConnection = async (id: string) => {
     setTestingId(id);
@@ -205,6 +258,36 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
         </div>
       </div>
 
+      {/* OAuth Redirect Feedback Banner */}
+      {oauthFeedback && (
+        <div
+          className={`rounded-xl p-3.5 text-xs flex items-center justify-between gap-3 border ${
+            oauthFeedback.type === 'success'
+              ? 'bg-emerald-950/40 border-emerald-700/60 text-emerald-200'
+              : 'bg-rose-950/40 border-rose-700/60 text-rose-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {oauthFeedback.type === 'success' ? (
+              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+            ) : (
+              <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
+            )}
+            <span>{oauthFeedback.message}</span>
+          </div>
+          {onClearOAuthFeedback && (
+            <button
+              type="button"
+              onClick={onClearOAuthFeedback}
+              className="text-slate-300 hover:text-white cursor-pointer"
+              aria-label="Dismiss OAuth notice"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      )}
+
       {/* Page Error Banner */}
       {pageError && (
         <div className="rounded-xl bg-rose-950/40 border border-rose-700/60 p-3.5 text-xs text-rose-200 flex items-center justify-between gap-3">
@@ -237,13 +320,17 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {reauthMailboxes.some((m) => m.provider === 'gmail') && (
-              <a
-                href="/api/auth/google"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 px-3 py-1.5 text-xs font-semibold text-white transition"
+              <button
+                type="button"
+                onClick={() =>
+                  handleConnectGoogleOAuth(reauthMailboxes.find((m) => m.provider === 'gmail'))
+                }
+                disabled={checkingOAuthTarget !== null}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 px-3 py-1.5 text-xs font-semibold text-white transition cursor-pointer disabled:opacity-60"
               >
                 <Key className="h-3.5 w-3.5" />
-                Reconnect Google OAuth
-              </a>
+                {checkingOAuthTarget ? 'Checking OAuth...' : 'Reconnect Google OAuth'}
+              </button>
             )}
           </div>
         </div>
@@ -441,13 +528,17 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
                       </div>
                     </div>
                     {mb.provider === 'gmail' && (
-                      <a
-                        href="/api/auth/google"
-                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-semibold transition shadow-xs"
+                      <button
+                        type="button"
+                        onClick={() => handleConnectGoogleOAuth(mb)}
+                        disabled={checkingOAuthTarget === mb.id}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-rose-600 hover:bg-rose-500 text-white text-[11px] font-semibold transition shadow-xs cursor-pointer disabled:opacity-60"
                       >
                         <Key className="h-3 w-3" />
-                        <span>Reconnect Google Account</span>
-                      </a>
+                        <span>
+                          {checkingOAuthTarget === mb.id ? 'Checking OAuth...' : 'Reconnect Google Account'}
+                        </span>
+                      </button>
                     )}
                   </div>
                 )}
@@ -542,9 +633,16 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
       {/* CONNECT ACCOUNT MODAL */}
       {showAddModal && (
         <ConnectAccountModal
-          onClose={() => setShowAddModal(false)}
+          initialDefaults={connectDefaults || undefined}
+          onConnectGoogleOAuth={() => handleConnectGoogleOAuth()}
+          isCheckingGoogleOAuth={checkingOAuthTarget === 'global'}
+          onClose={() => {
+            setShowAddModal(false);
+            setConnectDefaults(null);
+          }}
           onConnected={() => {
             setShowAddModal(false);
+            setConnectDefaults(null);
             onRefreshMailboxes();
           }}
         />
@@ -557,6 +655,44 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
           onClose={() => setEditingMailbox(null)}
           onSaved={() => {
             setEditingMailbox(null);
+            onRefreshMailboxes();
+          }}
+        />
+      )}
+
+      {/* IN-APP GOOGLE OAUTH SETUP & RECOVERY MODAL */}
+      {googleOAuthSetupModal && (
+        <GoogleOAuthSetupModal
+          info={googleOAuthSetupModal}
+          isRetrying={checkingOAuthTarget !== null}
+          onRetry={() => handleConnectGoogleOAuth(googleOAuthSetupModal.targetMailbox)}
+          onUseAppPassword={() => {
+            const target = googleOAuthSetupModal.targetMailbox;
+            setGoogleOAuthSetupModal(null);
+            if (target) {
+              setAppPasswordTarget(target);
+            } else {
+              setConnectDefaults({
+                provider: 'smtp',
+                smtpHost: 'smtp.gmail.com',
+                smtpPort: 587,
+                imapHost: 'imap.gmail.com',
+                imapPort: 993,
+              });
+              setShowAddModal(true);
+            }
+          }}
+          onClose={() => setGoogleOAuthSetupModal(null)}
+        />
+      )}
+
+      {/* GMAIL APP PASSWORD RECONNECT MODAL */}
+      {appPasswordTarget && (
+        <GmailAppPasswordModal
+          mailbox={appPasswordTarget}
+          onClose={() => setAppPasswordTarget(null)}
+          onConnected={() => {
+            setAppPasswordTarget(null);
             onRefreshMailboxes();
           }}
         />
@@ -594,20 +730,31 @@ export const EmailAccountsPage: React.FC<EmailAccountsPageProps> = ({
 };
 
 // CONNECT ACCOUNT MODAL
-const ConnectAccountModal: React.FC<{ onClose: () => void; onConnected: () => void }> = ({
-  onClose,
-  onConnected,
-}) => {
-  const [provider, setProvider] = useState<'gmail' | 'outlook' | 'smtp'>('smtp');
-  const [email, setEmail] = useState('');
-  const [name, setName] = useState('');
+const ConnectAccountModal: React.FC<{
+  initialDefaults?: {
+    provider?: 'gmail' | 'outlook' | 'smtp';
+    email?: string;
+    name?: string;
+    smtpHost?: string;
+    smtpPort?: number;
+    imapHost?: string;
+    imapPort?: number;
+  };
+  onConnectGoogleOAuth: () => void;
+  isCheckingGoogleOAuth: boolean;
+  onClose: () => void;
+  onConnected: () => void;
+}> = ({ initialDefaults, onConnectGoogleOAuth, isCheckingGoogleOAuth, onClose, onConnected }) => {
+  const [provider, setProvider] = useState<'gmail' | 'outlook' | 'smtp'>(initialDefaults?.provider || 'smtp');
+  const [email, setEmail] = useState(initialDefaults?.email || '');
+  const [name, setName] = useState(initialDefaults?.name || '');
   const [dailyLimit, setDailyLimit] = useState(40);
-  const [smtpHost, setSmtpHost] = useState('smtp.mailgun.org');
-  const [smtpPort, setSmtpPort] = useState(587);
-  const [smtpUser, setSmtpUser] = useState('');
+  const [smtpHost, setSmtpHost] = useState(initialDefaults?.smtpHost || 'smtp.mailgun.org');
+  const [smtpPort, setSmtpPort] = useState(initialDefaults?.smtpPort || 587);
+  const [smtpUser, setSmtpUser] = useState(initialDefaults?.email || '');
   const [smtpPass, setSmtpPass] = useState('');
-  const [imapHost, setImapHost] = useState('');
-  const [imapPort, setImapPort] = useState(993);
+  const [imapHost, setImapHost] = useState(initialDefaults?.imapHost || '');
+  const [imapPort, setImapPort] = useState(initialDefaults?.imapPort || 993);
   const [oauthToken, setOauthToken] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -810,9 +957,11 @@ const ConnectAccountModal: React.FC<{ onClose: () => void; onConnected: () => vo
                 <p className="text-[11px] text-slate-400 leading-snug">
                   Authorize OutboundOS with your Google account in 1 click. Generates offline refresh tokens saved in local SQLite.
                 </p>
-                <a
-                  href="/api/auth/google"
-                  className="flex items-center justify-center gap-2 w-full py-2 px-3 rounded-lg bg-white hover:bg-slate-100 text-slate-900 font-semibold text-xs transition shadow-xs cursor-pointer"
+                <button
+                  type="button"
+                  onClick={onConnectGoogleOAuth}
+                  disabled={isCheckingGoogleOAuth}
+                  className="flex items-center justify-center gap-2 w-full py-2 px-3 rounded-lg bg-white hover:bg-slate-100 text-slate-900 font-semibold text-xs transition shadow-xs cursor-pointer disabled:opacity-60"
                 >
                   <svg className="h-3.5 w-3.5" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -820,8 +969,8 @@ const ConnectAccountModal: React.FC<{ onClose: () => void; onConnected: () => vo
                     <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/>
                     <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/>
                   </svg>
-                  <span>Authorize with Google OAuth</span>
-                </a>
+                  <span>{isCheckingGoogleOAuth ? 'Checking Google OAuth...' : 'Authorize with Google OAuth'}</span>
+                </button>
               </div>
 
               <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
@@ -1019,6 +1168,268 @@ const EditAccountModal: React.FC<{ mailbox: MailboxAccount; onClose: () => void;
               className="rounded-lg bg-blue-600 px-4 py-1.5 font-medium text-white hover:bg-blue-500 disabled:opacity-50 cursor-pointer"
             >
               {isSaving ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+// IN-APP GOOGLE OAUTH SETUP & RECOVERY MODAL
+const GoogleOAuthSetupModal: React.FC<{
+  info: GoogleOAuthStatusInfo & { targetMailbox?: MailboxAccount };
+  isRetrying: boolean;
+  onRetry: () => void;
+  onUseAppPassword: () => void;
+  onClose: () => void;
+}> = ({ info, isRetrying, onRetry, onUseAppPassword, onClose }) => {
+  const [copiedField, setCopiedField] = useState<'redirect' | 'origin' | null>(null);
+
+  const copyValue = (text: string, field: 'redirect' | 'origin') => {
+    navigator.clipboard?.writeText(text).catch(() => {});
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
+      <div className="w-full max-w-lg rounded-2xl bg-[#080d19] border border-slate-800 p-6 shadow-2xl text-slate-200 text-xs space-y-4">
+        <div className="flex items-start justify-between border-b border-slate-800/80 pb-3">
+          <div>
+            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+              <Key className="h-4 w-4 text-blue-400" />
+              Google OAuth Credentials Required
+            </h3>
+            <p className="text-[11px] text-slate-400 mt-0.5">
+              {info.targetMailbox
+                ? `Cannot launch direct OAuth for ${info.targetMailbox.email} until your local .env has Google Cloud OAuth credentials.`
+                : 'Cannot launch direct OAuth until your local .env has Google Cloud OAuth credentials.'}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close Google OAuth notice"
+            className="rounded p-1 text-slate-400 hover:text-white cursor-pointer"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="rounded-xl bg-slate-900/70 border border-slate-800 p-3.5 space-y-2">
+          <div className="flex items-center justify-between font-mono text-[11px]">
+            <span className="text-slate-400">GOOGLE_CLIENT_ID in .env:</span>
+            <span className={info.hasClientId ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
+              {info.hasClientId ? 'Configured' : 'Missing'}
+            </span>
+          </div>
+          <div className="flex items-center justify-between font-mono text-[11px]">
+            <span className="text-slate-400">GOOGLE_CLIENT_SECRET in .env:</span>
+            <span className={info.hasClientSecret ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
+              {info.hasClientSecret ? 'Configured' : 'Missing'}
+            </span>
+          </div>
+        </div>
+
+        <div className="space-y-2.5">
+          <p className="text-[11px] text-slate-300 leading-relaxed">
+            To enable 1-click Google OAuth on <span className="font-mono text-white">localhost:3000</span>:
+          </p>
+          <ol className="list-decimal list-inside space-y-1.5 text-[11px] text-slate-400 leading-relaxed">
+            <li>
+              In Google Cloud Console (OAuth 2.0 Web Client), allow these exact URLs:
+            </li>
+          </ol>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-900 border border-slate-800 px-2.5 py-1.5">
+              <div className="min-w-0">
+                <span className="text-[10px] text-slate-500 block">Authorized Redirect URI</span>
+                <span className="font-mono text-[11px] text-blue-300 break-all">{info.redirectUri}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => copyValue(info.redirectUri, 'redirect')}
+                className="shrink-0 rounded bg-slate-800 hover:bg-slate-700 px-2 py-1 text-[10px] text-slate-200 flex items-center gap-1 cursor-pointer"
+              >
+                {copiedField === 'redirect' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                {copiedField === 'redirect' ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-900 border border-slate-800 px-2.5 py-1.5">
+              <div className="min-w-0">
+                <span className="text-[10px] text-slate-500 block">Authorized JavaScript Origin</span>
+                <span className="font-mono text-[11px] text-blue-300 break-all">{info.origin}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => copyValue(info.origin, 'origin')}
+                className="shrink-0 rounded bg-slate-800 hover:bg-slate-700 px-2 py-1 text-[10px] text-slate-200 flex items-center gap-1 cursor-pointer"
+              >
+                {copiedField === 'origin' ? <Check className="h-3 w-3 text-emerald-400" /> : <Copy className="h-3 w-3" />}
+                {copiedField === 'origin' ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            2. Create or update <span className="font-mono text-slate-200">.env</span> in your project folder (copied from <span className="font-mono text-slate-200">.env.example</span>) with <span className="font-mono text-slate-200">GOOGLE_CLIENT_ID</span>, <span className="font-mono text-slate-200">GOOGLE_CLIENT_SECRET</span>, and <span className="font-mono text-slate-200">GOOGLE_REDIRECT_URI</span>, then restart the app server.
+          </p>
+        </div>
+
+        <div className="pt-3 border-t border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={onUseAppPassword}
+            className="rounded-lg bg-indigo-950/70 hover:bg-indigo-900/60 border border-indigo-700/60 px-3 py-1.5 text-[11px] font-medium text-indigo-200 transition cursor-pointer"
+          >
+            Use Gmail App Password (SMTP/IMAP) Instead
+          </button>
+
+          <div className="flex items-center gap-2 justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg bg-slate-900 border border-slate-800 px-3 py-1.5 text-slate-300 hover:bg-slate-800 cursor-pointer"
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              onClick={onRetry}
+              disabled={isRetrying}
+              className="rounded-lg bg-blue-600 hover:bg-blue-500 px-3.5 py-1.5 font-semibold text-white transition cursor-pointer disabled:opacity-60"
+            >
+              {isRetrying ? 'Checking...' : 'Retry Google OAuth'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// RECONNECT EXISTING GMAIL MAILBOX VIA GOOGLE APP PASSWORD (SMTP/IMAP)
+const GmailAppPasswordModal: React.FC<{
+  mailbox: MailboxAccount;
+  onClose: () => void;
+  onConnected: () => void;
+}> = ({ mailbox, onClose, onConnected }) => {
+  const [appPassword, setAppPassword] = useState('');
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!appPassword.trim()) return;
+    setIsSaving(true);
+    setErrorMsg(null);
+    try {
+      const updateRes = await fetch(`/api/mailboxes/${mailbox.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'smtp',
+          smtpHost: 'smtp.gmail.com',
+          smtpPort: 587,
+          smtpUser: mailbox.email,
+          smtpPass: appPassword.trim(),
+          smtpSecure: false,
+          imapHost: 'imap.gmail.com',
+          imapPort: 993,
+          imapUser: mailbox.email,
+          imapPass: appPassword.trim(),
+          imapSecure: true,
+          status: 'connected',
+        }),
+      });
+      if (!updateRes.ok) {
+        const err = await updateRes.json().catch(() => ({}));
+        setErrorMsg(err.error || 'Failed to update mailbox credentials.');
+        return;
+      }
+
+      const testRes = await fetch(`/api/mailboxes/${mailbox.id}/test-connection`, {
+        method: 'POST',
+      });
+      const testData = await testRes.json().catch(() => ({}));
+      if (!testRes.ok || !testData.success) {
+        setErrorMsg(testData.message || 'SMTP verification failed. Check your 16-character Google App Password.');
+        return;
+      }
+      onConnected();
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Connection error.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xs p-4">
+      <div className="w-full max-w-md rounded-2xl bg-[#080d19] border border-slate-800 p-6 shadow-2xl text-slate-200 text-xs space-y-4">
+        <div className="flex items-start justify-between border-b border-slate-800/80 pb-3">
+          <div>
+            <h3 className="text-sm font-bold text-white">Reconnect with Gmail App Password</h3>
+            <span className="font-mono text-slate-400 text-[11px]">{mailbox.email}</span>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded p-1 text-slate-400 hover:text-white cursor-pointer"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {errorMsg && (
+          <div className="p-2.5 rounded-lg bg-rose-950/50 border border-rose-700/60 text-rose-200 text-xs flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div className="rounded-lg bg-slate-900/70 border border-slate-800 p-3 text-[11px] text-slate-400 space-y-1">
+            <div>
+              SMTP: <span className="font-mono text-slate-200">smtp.gmail.com:587</span>
+            </div>
+            <div>
+              IMAP: <span className="font-mono text-slate-200">imap.gmail.com:993</span>
+            </div>
+            <p className="pt-1 text-slate-400">
+              Works immediately at $0 without Google Cloud OAuth setup using a 16-character Google App Password.
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-slate-300 font-medium mb-1">Google App Password *</label>
+            <input
+              type="password"
+              required
+              placeholder="xxxx xxxx xxxx xxxx"
+              value={appPassword}
+              onChange={(e) => setAppPassword(e.target.value)}
+              className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-1.5 text-slate-100 font-mono focus:border-blue-500 focus:outline-none"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-800/80">
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg bg-slate-900 border border-slate-800 px-3.5 py-1.5 text-slate-300 hover:bg-slate-800 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSaving}
+              className="rounded-lg bg-blue-600 hover:bg-blue-500 px-4 py-1.5 font-semibold text-white disabled:opacity-50 cursor-pointer"
+            >
+              {isSaving ? 'Verifying SMTP...' : 'Verify & Connect'}
             </button>
           </div>
         </form>

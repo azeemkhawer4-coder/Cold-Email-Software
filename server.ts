@@ -264,22 +264,49 @@ app.use('/api', (req: Request, res: Response, next) => {
 // ==========================================
 // GOOGLE OAUTH 2.0 FLOW
 // ==========================================
-app.get('/api/auth/google', (req: Request, res: Response) => {
-  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI?.trim() || `http://${req.headers.host || 'localhost:3000'}/api/auth/google/callback`;
+function getGoogleOAuthEnv(req: Request) {
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim() || '';
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim() || '';
+  const hasClientId = Boolean(clientId && clientId !== 'MY_GOOGLE_CLIENT_ID');
+  const hasClientSecret = Boolean(clientSecret && clientSecret !== 'MY_GOOGLE_CLIENT_SECRET');
+  const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() || req.protocol || 'http';
+  const host = req.headers.host || 'localhost:3000';
+  const origin = `${proto}://${host}`;
+  const redirectUri = process.env.GOOGLE_REDIRECT_URI?.trim() || `${origin}/api/auth/google/callback`;
+  return { clientId, clientSecret, hasClientId, hasClientSecret, origin, redirectUri };
+}
 
-  if (!clientId || clientId === 'MY_GOOGLE_CLIENT_ID') {
+app.get('/api/auth/google/status', (req: Request, res: Response) => {
+  const cfg = getGoogleOAuthEnv(req);
+  res.json({
+    configured: cfg.hasClientId && cfg.hasClientSecret,
+    hasClientId: cfg.hasClientId,
+    hasClientSecret: cfg.hasClientSecret,
+    redirectUri: cfg.redirectUri,
+    origin: cfg.origin,
+  });
+});
+
+app.get('/api/auth/google', (req: Request, res: Response) => {
+  const cfg = getGoogleOAuthEnv(req);
+
+  if (!cfg.hasClientId || !cfg.hasClientSecret) {
+    const missing = [
+      !cfg.hasClientId ? 'GOOGLE_CLIENT_ID' : null,
+      !cfg.hasClientSecret ? 'GOOGLE_CLIENT_SECRET' : null,
+    ].filter(Boolean);
     return res.status(400).send(`
       <!DOCTYPE html>
       <html>
         <head><title>Google OAuth Notice</title></head>
         <body style="font-family: system-ui, -apple-system, sans-serif; background: #070b14; color: #fff; padding: 40px; text-align: center;">
           <h2 style="color: #60a5fa;">Google OAuth Setup Notice</h2>
-          <p style="color: #94a3b8; max-width: 500px; margin: 0 auto 20px; line-height: 1.6;">
-            Please configure <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> in your local <code>.env</code> file.<br>
-            Then redirect URI: <code>${redirectUri}</code>
+          <p style="color: #94a3b8; max-width: 520px; margin: 0 auto 20px; line-height: 1.6;">
+            Missing <code>${missing.join(' and ')}</code> in your local <code>.env</code> file.<br>
+            Set these variables in <code>.env</code>, restart OutboundOS, and use redirect URI:<br>
+            <code>${cfg.redirectUri}</code>
           </p>
-          <a href="/#mailboxes" style="color: #3b82f6; text-decoration: underline;">Return to OutboundOS</a>
+          <a href="/#mailboxes?error=oauth_env_not_configured" style="color: #3b82f6; text-decoration: underline;">Return to OutboundOS Email Accounts</a>
         </body>
       </html>
     `);
@@ -291,18 +318,30 @@ app.get('/api/auth/google', (req: Request, res: Response) => {
     'https://www.googleapis.com/auth/userinfo.profile',
   ].join(' ');
 
-  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scopes)}&access_type=offline&prompt=consent`;
+  const loginHint = typeof req.query.email === 'string' ? req.query.email.trim() : '';
+  const authUrl =
+    `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(cfg.clientId)}` +
+    `&redirect_uri=${encodeURIComponent(cfg.redirectUri)}` +
+    `&response_type=code&scope=${encodeURIComponent(scopes)}` +
+    `&access_type=offline&prompt=consent` +
+    (loginHint ? `&login_hint=${encodeURIComponent(loginHint)}` : '');
   res.redirect(authUrl);
 });
 
 app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
-  const code = req.query.code as string;
-  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
-  const redirectUri = process.env.GOOGLE_REDIRECT_URI?.trim() || `http://${req.headers.host || 'localhost:3000'}/api/auth/google/callback`;
+  const oauthError = req.query.error as string | undefined;
+  if (oauthError) {
+    return res.redirect(`/#mailboxes?error=${encodeURIComponent(oauthError)}`);
+  }
 
-  if (!code || !clientId || !clientSecret) {
+  const code = req.query.code as string;
+  const cfg = getGoogleOAuthEnv(req);
+
+  if (!cfg.hasClientId || !cfg.hasClientSecret) {
     return res.redirect('/#mailboxes?error=oauth_config_missing');
+  }
+  if (!code) {
+    return res.redirect('/#mailboxes?error=oauth_code_missing');
   }
 
   try {
@@ -311,9 +350,9 @@ app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         code,
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: redirectUri,
+        client_id: cfg.clientId,
+        client_secret: cfg.clientSecret,
+        redirect_uri: cfg.redirectUri,
         grant_type: 'authorization_code',
       }),
     });
@@ -361,8 +400,8 @@ app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
         accessToken,
         refreshToken: encryptedRefreshToken,
         expiresAt: Date.now() + (tokenData.expires_in || 3600) * 1000,
-        clientId,
-        clientSecret,
+        clientId: cfg.clientId,
+        clientSecret: cfg.clientSecret,
       };
       mailbox.updatedAt = nowIso;
     } else {
@@ -394,8 +433,8 @@ app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
           accessToken,
           refreshToken: encryptedRefreshToken,
           expiresAt: Date.now() + (tokenData.expires_in || 3600) * 1000,
-          clientId,
-          clientSecret,
+          clientId: cfg.clientId,
+          clientSecret: cfg.clientSecret,
         },
         createdAt: nowIso,
         updatedAt: nowIso,
@@ -404,7 +443,7 @@ app.get('/api/auth/google/callback', async (req: Request, res: Response) => {
     }
 
     saveDatabase(db);
-    res.redirect('/#mailboxes?connected=google');
+    res.redirect(`/#mailboxes?connected=google&email=${encodeURIComponent(email)}`);
   } catch (err: any) {
     console.error('[Google OAuth] Callback error:', err);
     res.redirect('/#mailboxes?error=oauth_exception');
@@ -1308,6 +1347,11 @@ app.put('/api/mailboxes/:id', (req: Request, res: Response) => {
 
   clearTransporterCache(mb.id);
   Object.assign(mb, req.body);
+  if (req.body.status === 'connected' && !('lastError' in req.body)) {
+    mb.lastError = undefined;
+    mb.lastTokenRefreshError = undefined;
+  }
+  mb.updatedAt = new Date().toISOString();
   saveDatabase(db);
   res.json({ success: true, mailbox: mb });
 });

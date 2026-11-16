@@ -29,11 +29,25 @@ import {
   WorkspaceSettings,
   ZeroCostStatus,
 } from './types';
+import {
+  parseOAuthHashRoute,
+  getGoogleOAuthFeedback,
+  OAuthFeedback,
+} from './utils/oauthHash';
 
 const LOCAL_UNLOCK_KEY = 'outboundos_local_unlocked';
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<NavigationItem>('dashboard');
+  const [currentTab, setCurrentTab] = useState<NavigationItem>(() => {
+    if (typeof window === 'undefined') return 'dashboard';
+    const parsed = parseOAuthHashRoute(window.location.hash);
+    return (parsed.tab as NavigationItem) || 'dashboard';
+  });
+  const [oauthFeedback, setOAuthFeedback] = useState<OAuthFeedback | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const parsed = parseOAuthHashRoute(window.location.hash);
+    return getGoogleOAuthFeedback(parsed);
+  });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [isSimulateModalOpen, setIsSimulateModalOpen] = useState(false);
   const [openCreateCampaignWizard, setOpenCreateCampaignWizard] = useState(false);
@@ -153,6 +167,29 @@ export default function App() {
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
+
+  // Handle hash redirects from OAuth callbacks (e.g. /#mailboxes?connected=google)
+  useEffect(() => {
+    const syncHashRoute = () => {
+      if (typeof window === 'undefined') return;
+      const parsed = parseOAuthHashRoute(window.location.hash);
+      if (parsed.tab) {
+        setCurrentTab(parsed.tab as NavigationItem);
+      }
+      const feedback = getGoogleOAuthFeedback(parsed);
+      if (feedback) {
+        setOAuthFeedback(feedback);
+        if (parsed.connected === 'google') {
+          fetchAllData();
+        }
+        window.history.replaceState(null, '', `#${parsed.tab || 'mailboxes'}`);
+      }
+    };
+
+    syncHashRoute();
+    window.addEventListener('hashchange', syncHashRoute);
+    return () => window.removeEventListener('hashchange', syncHashRoute);
+  }, [fetchAllData]);
 
   const handleTriggerWorker = async () => {
     setIsWorkerRunning(true);
@@ -330,6 +367,8 @@ export default function App() {
                 <EmailAccountsPage
                   mailboxes={mailboxes}
                   onRefreshMailboxes={fetchAllData}
+                  oauthFeedback={oauthFeedback}
+                  onClearOAuthFeedback={() => setOAuthFeedback(null)}
                 />
               )}
 
