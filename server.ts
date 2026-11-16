@@ -44,6 +44,7 @@ import { fileURLToPath } from 'url';
 import { enrollAllActiveCampaigns, enrollCampaignLeadsIntoQueue, isWithinScheduleWindow } from './src/server/scheduler';
 import { validateEmailSyntax, parseCsvRows, autoDetectColumnMappings } from './src/utils/emailValidator';
 import { isProductionConnectedMailbox } from './src/utils/senderRotation';
+import { assignLeadsToList, recalculateListLeadCounts } from './src/utils/listAssignment';
 import { Lead, Campaign, MailboxAccount, Deal, Automation, Company, Task, ZeroCostStatus } from './src/types';
 
 dotenv.config();
@@ -622,8 +623,70 @@ app.put('/api/leads/:id', (req: Request, res: Response) => {
   if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
   Object.assign(lead, req.body);
+  db.lists = recalculateListLeadCounts(db.leads, db.lists);
   saveDatabase(db);
   res.json({ success: true, lead });
+});
+
+app.post('/api/leads/bulk-list', (req: Request, res: Response) => {
+  const db = getDatabase();
+  const { leadIds, listId, newListName, newListDescription } = req.body || {};
+
+  if (!Array.isArray(leadIds) || leadIds.length === 0) {
+    return res.status(400).json({ error: 'Select at least one lead first.' });
+  }
+
+  let targetList = listId ? db.lists.find((l) => l.id === listId) : undefined;
+
+  if (typeof newListName === 'string' && newListName.trim()) {
+    const trimmedName = newListName.trim();
+    const existingByName = db.lists.find(
+      (l) => l.name.trim().toLowerCase() === trimmedName.toLowerCase()
+    );
+    if (existingByName) {
+      targetList = existingByName;
+    } else {
+      targetList = {
+        id: `list-${Date.now()}`,
+        workspaceId: db.workspace.id,
+        name: trimmedName,
+        description: typeof newListDescription === 'string' ? newListDescription.trim() : '',
+        leadCount: 0,
+        tags: ['Outreach'],
+        type: 'static',
+        createdAt: new Date().toISOString(),
+      };
+      db.lists.push(targetList);
+    }
+  } else if (!targetList) {
+    return res.status(400).json({
+      error: listId ? 'Selected target list was not found.' : 'Choose an existing list or enter a new list name.',
+    });
+  }
+
+  const { updatedLeads, updatedLists, updatedCount } = assignLeadsToList(
+    db.leads,
+    db.lists,
+    leadIds,
+    targetList.id
+  );
+  db.leads = updatedLeads;
+  db.lists = updatedLists;
+  const refreshedTargetList = db.lists.find((l) => l.id === targetList!.id) || targetList;
+
+  db.auditLogs.unshift({
+    id: `log-${Date.now()}`,
+    action: 'LEADS_ASSIGNED_TO_LIST',
+    details: `Assigned ${updatedCount} lead(s) to list "${refreshedTargetList.name}"`,
+    timestamp: new Date().toISOString(),
+  });
+
+  saveDatabase(db);
+  res.json({
+    success: true,
+    updatedCount,
+    list: refreshedTargetList,
+  });
 });
 
 app.delete('/api/leads', (req: Request, res: Response) => {
@@ -632,6 +695,7 @@ app.delete('/api/leads', (req: Request, res: Response) => {
   if (!Array.isArray(ids)) return res.status(400).json({ error: 'Invalid ids array' });
 
   db.leads = db.leads.filter((l) => !ids.includes(l.id));
+  db.lists = recalculateListLeadCounts(db.leads, db.lists);
   saveDatabase(db);
   res.json({ success: true, count: ids.length });
 });
@@ -772,6 +836,7 @@ app.post('/api/lists', (req: Request, res: Response) => {
 app.delete('/api/lists/:id', (req: Request, res: Response) => {
   const db = getDatabase();
   db.lists = db.lists.filter((l) => l.id !== req.params.id);
+  db.leads = db.leads.map((l) => (l.listId === req.params.id ? { ...l, listId: undefined } : l));
   saveDatabase(db);
   res.json({ success: true });
 });

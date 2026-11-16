@@ -19,9 +19,11 @@ import {
   MapPin,
   Filter,
   AlertCircle,
+  FolderPlus,
 } from 'lucide-react';
 import { Lead, LeadList } from '../types';
 import { isLeadIncomplete } from '../utils/analyticsStats';
+import { AddLeadsToListModal } from '../components/leads/AddLeadsToListModal';
 
 export { isLeadIncomplete };
 
@@ -52,6 +54,8 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
   const [showAddModal, setShowAddModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showBulkListModal, setShowBulkListModal] = useState(false);
+  const [bulkFeedback, setBulkFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   useEffect(() => {
     setListFilter(selectedListId || 'all');
@@ -169,15 +173,26 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
           {selectedLeadIds.size > 0 && (
-            <button
-              onClick={handleDeleteSelected}
-              className="flex items-center gap-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 px-3 py-1.5 text-xs font-medium text-rose-400 hover:bg-rose-500/20 transition cursor-pointer"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              <span>Delete ({selectedLeadIds.size})</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => setShowBulkListModal(true)}
+                className="flex items-center gap-1.5 rounded-lg bg-blue-600/15 border border-blue-500/40 px-3 py-1.5 text-xs font-medium text-blue-300 hover:bg-blue-600/25 hover:text-white transition cursor-pointer"
+              >
+                <FolderPlus className="h-3.5 w-3.5" />
+                <span>Add to List ({selectedLeadIds.size})</span>
+              </button>
+
+              <button
+                onClick={handleDeleteSelected}
+                className="flex items-center gap-1.5 rounded-lg bg-rose-500/10 border border-rose-500/30 px-3 py-1.5 text-xs font-medium text-rose-400 hover:bg-rose-500/20 transition cursor-pointer"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Delete ({selectedLeadIds.size})</span>
+              </button>
+            </>
           )}
 
           <button
@@ -291,6 +306,33 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
         )}
       </div>
 
+      {bulkFeedback && (
+        <div
+          className={`mx-6 mt-3 rounded-xl px-4 py-2.5 text-xs flex items-center justify-between border ${
+            bulkFeedback.type === 'success'
+              ? 'bg-emerald-950/40 border-emerald-700/60 text-emerald-200'
+              : 'bg-rose-950/40 border-rose-700/60 text-rose-200'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {bulkFeedback.type === 'success' ? (
+              <CheckCircle2 className="h-4 w-4 text-emerald-400 shrink-0" />
+            ) : (
+              <AlertCircle className="h-4 w-4 text-rose-400 shrink-0" />
+            )}
+            <span>{bulkFeedback.message}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setBulkFeedback(null)}
+            aria-label="Dismiss notification"
+            className="text-slate-400 hover:text-white cursor-pointer"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Leads Table */}
       <div className="flex-1 overflow-auto custom-scrollbar">
         <table className="w-full border-collapse text-left text-xs">
@@ -299,6 +341,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
               <th className="py-2.5 px-4 w-10">
                 <input
                   type="checkbox"
+                  aria-label="Select all visible leads"
                   checked={selectedLeadIds.size > 0 && selectedLeadIds.size === filteredLeads.length}
                   onChange={toggleSelectAll}
                   className="rounded border-slate-700 text-blue-600 focus:ring-0 bg-slate-900"
@@ -328,6 +371,7 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
                   <td className="py-2.5 px-4" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
+                      aria-label={`Select ${lead.fullName?.trim() || lead.email}`}
                       checked={isSelected}
                       onChange={() => toggleSelectLead(lead.id)}
                       className="rounded border-slate-700 text-blue-600 focus:ring-0 bg-slate-900"
@@ -540,6 +584,45 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
 
             <div className="surface-card rounded-xl p-4 space-y-2">
               <h3 className="text-xs font-semibold text-slate-200 uppercase tracking-wider font-mono">
+                List Membership
+              </h3>
+              <div>
+                <label htmlFor="drawer-lead-list" className="text-[11px] text-slate-400 block mb-1">
+                  Assigned Lead List
+                </label>
+                <select
+                  id="drawer-lead-list"
+                  value={activeLead.listId || ''}
+                  onChange={async (e) => {
+                    const nextListId = e.target.value || undefined;
+                    try {
+                      const res = await fetch(`/api/leads/${activeLead.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ listId: nextListId }),
+                      });
+                      if (res.ok) {
+                        setActiveLead({ ...activeLead, listId: nextListId });
+                        onRefreshLeads();
+                      }
+                    } catch (err) {
+                      console.error('Failed to update lead list:', err);
+                    }
+                  }}
+                  className="w-full rounded-lg bg-slate-900 border border-slate-800 px-3 py-1.5 text-slate-200 text-xs focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="">Unassigned</option>
+                  {lists.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="surface-card rounded-xl p-4 space-y-2">
+              <h3 className="text-xs font-semibold text-slate-200 uppercase tracking-wider font-mono">
                 Compliance & Safeguards
               </h3>
               <div className="flex items-center justify-between text-xs pt-1">
@@ -573,6 +656,24 @@ export const LeadsPage: React.FC<LeadsPageProps> = ({
           lists={lists}
           onSuccess={() => {
             setShowImportModal(false);
+            onRefreshLeads();
+          }}
+        />
+      )}
+
+      {/* BULK ADD TO LIST MODAL */}
+      {showBulkListModal && (
+        <AddLeadsToListModal
+          selectedLeadIds={Array.from(selectedLeadIds)}
+          lists={lists}
+          onClose={() => setShowBulkListModal(false)}
+          onSuccess={(listName, updatedCount) => {
+            setShowBulkListModal(false);
+            setSelectedLeadIds(new Set());
+            setBulkFeedback({
+              type: 'success',
+              message: `Added ${updatedCount} lead${updatedCount === 1 ? '' : 's'} to list "${listName}".`,
+            });
             onRefreshLeads();
           }}
         />
@@ -907,6 +1008,7 @@ const CsvImportModal: React.FC<{
                 onChange={(e) => setSelectedListId(e.target.value)}
                 className="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-slate-200"
               >
+                <option value="">Unassigned (or add to list later)</option>
                 {lists.map((l) => (
                   <option key={l.id} value={l.id}>{l.name}</option>
                 ))}
